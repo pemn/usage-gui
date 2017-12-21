@@ -1,12 +1,112 @@
 #!python
-# data drive GUI interface
+"""
+Copyright 2017 Vale
 
-import os, sys, re
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+You can contribute to the main repository at
+
+https://github.com/pemn/usage-gui
+
+
+"""
+# _gui.py
+# auxiliary functions for data input/output
+# data driven gui
+
+### COMMON ###
+
+import sys, os, os.path
+import pandas as pd
+
+# this function handles most of the details required when using a exe interface
+def usage_gui(usage = None):
+  # we already have argument, just proceed with execution
+  if(len(sys.argv) > 1):
+    main(*sys.argv[1:])
+  else:
+    # check if a exe file with same name as this script exists
+    exe = os.path.splitext(sys.argv[0])[0] + ".exe"
+    if(os.path.isfile(exe)):
+      # call the exe interface which later may call this script as another process
+      os.system(exe)
+    else:
+      AppTk(usage).mainloop()
+
+# convenience function to return a dataframe base on the input file extension
+# bmf: vulcan block model
+# isis: vulcan database
+# csv: ascii table
+# xls: excel table
+def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
+  df = pd.DataFrame()
+  if input_path.lower().endswith('csv'):
+    df = pd.read_csv(input_path)
+    if len(condition) > 0:
+      df.query(condition, True)
+  elif input_path.lower().endswith('bmf'):
+    import vulcan
+    bm = vulcan.block_model(input_path)
+
+    if len(condition) > 0:
+      condition = '-C "%s"' % (condition)
+
+    # get a DataFrame with block model data
+    df = bm.get_pandas(vl, condition)
+  elif input_path.lower().endswith('isis'):
+    import vulcan
+    db = vulcan.isisdb(input_path)
+    # by default, use last table which is the desired one in most cases
+    if table_name is None or table_name not in db.table_list():
+      table_name = db.table_list()[-1]
+    # create special field "KEY"
+    field_list = list(db.field_list(table_name))
+    fdata = []
+    # db.keys is bugged as of vulcan 10.1.3
+    # we can only call it once. subsequent calls will only find the last key.
+    # db.rewind() does not help, and should not be necessary anyway
+    for ikey in db.keys:
+      for record in db.this_table(table_name):
+        fdata.append([db.get_key()] + [record[field] for field in field_list])
+    df = pd.DataFrame(fdata, None, ['KEY'] + field_list)
+    if len(condition) > 0:
+      df.query(condition, True)
+
+  # replace -99 with NaN, meaning they will not be included in the stats
+  df.mask(df == -99, inplace=True)
+
+  return(df)
+
+# convert field names in the TABLE:FIELD to just FIELD
+def table_field(args, table=False):
+  if isinstance(args, list):
+    args = [table_field(arg, table) for arg in args]
+  elif args.find(':') != -1:
+    if table:
+      args = args[0:args.find(':')]
+    else:
+      args = args[args.find(':')+1:]
+  return(args)
+
+
+## GUI ###
+# data driven GUI interface
+
+import re
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
-from _lib import pd_get_dataframe, table_field
 import pickle
 import subprocess
 
@@ -31,9 +131,16 @@ class Settings(str):
 
 # subclass of list with a string representation compatible to perl argument input
 # which expects a comma separated list with semicolumns between rows
+# this is to mantain compatibility with older versions of the usage gui
 class commalist(list):
     _rowfs = ";"
     _colfs = ","
+    def parse(self, arg):
+        "fill this instance with data from a string"
+        for row in arg.split(self._rowfs):
+            self.append(row.split(self._colfs))
+        return self
+
     def __str__(self):
         r = None
         for i in self:
@@ -57,36 +164,37 @@ def dgd_list_layers(input_path):
             r.append(db.get_key())
     return r
 
-# detects file type and return a list of options 
+# detects file type and return a list of relevant options
+# searches are cached, so subsequent searcher for the same file path are instant
 class smartfilelist(object):
     # global value cache, using path as key
-    cache = {}
+    _cache = {}
     @staticmethod
-    def smartfilelist(input_path):
+    def get(input_path):
         # if this file is already cached, skip to the end
-        if(input_path in smartfilelist.cache):
+        if(input_path in smartfilelist._cache):
             # do nothing
             pass
         elif(os.path.exists(input_path)):
             if(re.search("dgd\.isis$", input_path, re.IGNORECASE)):
                 # list layers of dgd files
-                smartfilelist.cache[input_path] = dgd_list_layers(input_path)
+                smartfilelist._cache[input_path] = dgd_list_layers(input_path)
             elif(re.search("isis|bmf|csv|xls.?$", input_path, re.IGNORECASE)):
                 # list columns of files handled by pd_get_dataframe
-                smartfilelist.cache[input_path] = list(pd_get_dataframe(input_path).columns)
+                smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path).columns)
 
         else: # default to a empty list
-            smartfilelist.cache[input_path] = []
+            smartfilelist._cache[input_path] = []
     
-        return(smartfilelist.cache[input_path])
+        return(smartfilelist._cache[input_path])
 
 class ClientScript(list):
     "Handles the script with the same name as this inteface file"
-    _file = None
+    _file = sys.argv[0]
     _type = None
     _usage = None
     _base = os.path.splitext(sys.argv[0])[0]
-    for ext in ['lava','csh','bat']:
+    for ext in ['csh','lava','pl','bat']:
         if os.path.exists(_base + '.' + ext):
             _file = _base + '.' + ext
             _type = ext.lower()
@@ -106,11 +214,9 @@ class ClientScript(list):
 
     @classmethod
     def run(cls, script):
-        print("run")
-        if cls._file is None:
+        if cls._type is None:
             # call the main on the caller script with the arguments as a python dict
-            from __main__ import main
-            main(**script.get())
+            main(*script.get())
         else:
             # create a new process and passes the arguments on the command line
             #process = subprocess.Popen(argv, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
@@ -143,6 +249,10 @@ class ClientScript(list):
         return(r)
 
     @classmethod
+    def fields(cls, usage = None):
+        return [re.match(r"^\w+", _).group(0) for _ in cls.args(usage)]
+
+    @classmethod
     def parse(cls):
         if os.path.exists(cls._file):
             with open(cls._file, 'r') as file:
@@ -152,103 +262,105 @@ class ClientScript(list):
                         if(m):
                             cls._usage = m.group(1)
                             break
-        return None
+        return cls._usage
 
-class ScriptFrame(ttk.Frame):
-    "dynamic frame that holds the script argument controls"
+class UsageToken(str):
+    _name = None
+    _type = None
+    _data = None
+    def __init__(self, arg):
+        super().__init__()
+        m = re.match(r"(\w*)(\*|@|#|=|:)(.*)", arg)
+        if (m):
+            self._name = m.group(1)
+            self._type = m.group(2)
+            self._data = m.group(3)
+        else:
+            self._name = arg
+    @property
+    def name(self):
+        return self._name
+    @property
+    def type(self):
+        return self._type
+    @property
+    def data(self):
+        return self._data
+
+class ScriptFrame(list):
+    "virtual frame that holds the script argument controls"
     _usage = None
-    def __init__(self, master, usage=None):
-        # since tkinter classes are old style we cant use super()
-        ttk.Frame.__init__(self, master)
-        self._usage = usage
-        
+    _master = None
+    def __init__(self, master, usage = None):
+        self._master = master
+        self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
+        for i in range(len(self._tokens)):
+            self.append(self.buildControl(self._tokens[i]))
+            self[-1].grid(pady=10, padx=20, row=i, sticky="we")
+            
+
+    @property
+    def master(self):
+        return self._master
+
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
-        #print("%s %s %s" % (ClientScript.exe(), ClientScript.file(), self.getArg()))
         cmd = "%s %s %s" % (ClientScript.exe(), ClientScript.file(), self.getArgs())
         print(cmd)
-        self.clipboard_clear()
-        self.clipboard_append(cmd)
-        self.update()
+        self.master.clipboard_clear()
+        self.master.clipboard_append(cmd)
+        self.master.update()
         messagebox.showinfo(message='Command line copied to clipboard')
 
-    def load(self, reset=False):
-        for c in tuple(self.children.values()): c.destroy()
-        self.arg = []
-        for arg in ClientScript.args(self._usage):
-            self.arg.append(re.match("\w*", arg).group(0))
-            self.buildControl(arg)
-        if not reset:
-            # restore the settings from the last run if any
-            self.set(Settings().load())
+    def children(self):
+        return self
 
     def get(self):
-        values = dict()
-        for i in self.arg:
-            values[i] = self.nametowidget(i).get()
-        return(values)
+        return [_.get() for _ in self]
     
     def getArgs(self):
         args = ''
-        for i in self.arg:
-            arg = str(self.nametowidget(i).get())
+        for n in self:
+            arg = str(n.get())
             if '"' not in arg and (' ' in arg or ';' in arg):
                 arg = '"' + arg + '"'
             args += " " + arg
         return(args)
-    # return [str(self.nametowidget(_).get())]
     
     def set(self, values):
-        for i in values:
-            if i in self.children:
-                c = self.nametowidget(i)
-                c.set(values[i])
-                
-    # override the destroy function so we can save the settings
-    def destroy(self, *args):
-        # store this frame settings into a ini file
-        Settings().save(self.get())
-        ttk.Frame.destroy(self)
+        for i in range(min(len(self), len(values))):
+            self[i].set(values[i])
+
+    def buildControl(self, token):
+        result = None
+        if(token.type == '@'):
+            result = CheckBox(self.master, token.name)
+        elif(token.type == '*'):
+            result = FileEntry(self.master, token.name, token.data)
+        elif(token.type == '='):
+            result = LabelCombo(self.master, token.name, token.data)
+        elif(token.type == ':'):
+            result = ComboPicker(self.master, token.name, token.data)
+        elif(token.type == '#'):
+            result = tkTable(self.master, token.name, token.data.split('#'))
+        else:
+            result = LabelEntry(self.master, token.name)
+        return result
         
-    def buildControl(self, arg):
-        m = re.match("(\w*)@", arg)
-        if(m):
-            CheckBox(self, m.group(1))
-            return
-        
-        m = re.match("(\w*)\*(.+)", arg)
-        if(m):
-            FileEntry(self, m.group(1), m.group(2)).pack()
-            return
-
-        m = re.match("(\w*):(.+)", arg)
-        if(m):
-            ComboPicker(self, m.group(1), m.group(2)).pack()
-            return
-
-        m = re.match("(\w*)=(.+)", arg)
-        if(m):
-            ComboPicker(self, m.group(1), m.group(2)).pack()
-            return
-
-        m = re.match("(\w*)#(.+)", arg)
-        if(m):
-            table = tkTable(self, m.group(1))
-            table.set([m.group(2).split('#')])
-            return
-
-        LabelEntry(self, arg)
-    
 
 # should behave the same as Tix LabelEntry but with some customizations
 class LabelEntry(ttk.Frame):
     def __init__(self, master, label):
         # create a container frame for the combo and label
         ttk.Frame.__init__(self, master, name=label)
-        ttk.Label(self, text=label).pack(side="left")
-        self._control = ttk.Entry(self)
-        self._control.pack(side="right")
-        self.pack(fill="both", padx=20, pady=2)
+        
+        if isinstance(master, tkTable):
+            self._control = ttk.Entry(self)
+        else:
+            self._control = ttk.Entry(self, width=60)
+            ttk.Label(self, text=label, width=-20).pack(side="left")
+
+        self._control.pack(expand=True, fill="both", side="right")
         
     def get(self):
         return(self._control.get())
@@ -265,7 +377,6 @@ class CheckBox(ttk.Checkbutton):
     def __init__(self, master, label, start=False):
         self._variable = tk.BooleanVar(value=start)
         ttk.Checkbutton.__init__(self, master, name=label, text=label, variable=self._variable)
-        self.pack(expand=True, fill="both", padx=20, pady=2)
     
     def get(self):
         return(self._variable.get())
@@ -274,13 +385,15 @@ class CheckBox(ttk.Checkbutton):
         return(self._variable.set(value))
 
 class LabelCombo(ttk.Frame):
-    def __init__(self, master, label):
+    def __init__(self, master, label, source=None):
         ttk.Frame.__init__(self, master, name=label)
-        ttk.Label(self, text=label).pack(side="left")
-        self._control = ttk.Combobox(self)
-        self._control.pack(side="right")
-        self.pack(fill="both", padx=20, pady=2)
-        self._control.bind("<<ComboboxSelected>>", self.ComboboxSelected)
+        if isinstance(master, tkTable):
+            self._control = ttk.Combobox(self)
+        else:
+            self._control = ttk.Combobox(self, width=60)
+            ttk.Label(self, text=label, width=-20).pack(side="left")
+
+        self._control.pack(expand=True, fill="both", side="right")
         self._control.bind("<ButtonPress>", self.ButtonPress)
 
     def get(self):
@@ -291,29 +404,36 @@ class LabelCombo(ttk.Frame):
     
     def setValues(self, values):
         self._control['values'] = values
-
-    # placeholder for the ComboboxSelected event handler
-    def ComboboxSelected(self, *args):
-        print("ComboboxSelected")
     
     # placeholder for the ButtonPress event handler
     def ButtonPress(self, *args):
-        print("LabelCombo ButtonPress")
+        if self._source is not None:
+            self.setValues(self._source.split(","))
 
 class ComboPicker(LabelCombo):
     def __init__(self, master, label, source):
-        LabelCombo.__init__(self, master, label)
+        LabelCombo.__init__(self, master, label, source)
         self._source = source
         
     def ButtonPress(self, *args):
-        print("ComboPicker ButtonPress")
         # temporarily set the cursor to a hourglass
         self._control['cursor'] = 'watch'
+        source_widget = None
+        if (isinstance(self.master, tkTable)):
+            if (self._source in self.master.master.children):
+                source_widget = self.master.master.nametowidget(self._source)
+            else:
+                row,_,_ = self.winfo_name().rpartition("_")
+                if len(row) and self._source + "_" + row in self.master.children:
+                    source_widget = self.master.nametowidget(self._source + "_" + row)
+        elif (self._source in self.master.children):
+            source_widget = self.master.nametowidget(self._source)
 
-        if (self._source in self.master.children):
-            self.setValues(smartfilelist.smartfilelist(self.master.nametowidget(self._source).get()))
+        if source_widget:
+            self.setValues(smartfilelist.get(source_widget.get()))
         else:
-            self.setValues(self._source.split(";"))
+            self.setValues([self._source])
+
         # reset the cursor back to default
         self._control['cursor'] = ''
 
@@ -321,20 +441,26 @@ class FileEntry(ttk.Frame):
     "custom Entry, with label and a Browse button"
     def __init__(self, master, label, wildcard=None):
         ttk.Frame.__init__(self, master, name=label)
-        ttk.Button(self, text="Browse...", command=self.OnBrowse).pack(side="right")
-        self._control = ttk.Entry(self, width=40)
-        self._control.pack(side="right")
-        ttk.Label(self, text=label).pack(side="left")
-        self.wildcard = [(_, _) for _ in wildcard.split(',')]
-        self.pack(expand=True, fill="both", padx=20, pady=2)
-        #~ ttk.Style().configure('style.TFrame', background='green')
-        #~ self['style'] = 'style.TFrame'
+        ttk.Button(self, text="⛘", command=self.OnBrowse).pack(side="right")
+        if isinstance(master, tkTable):
+            self._control = ttk.Entry(self)
+        else:
+            self._control = ttk.Entry(self, width=60)
+            ttk.Label(self, text=label, width=-20).pack(side="left")
+        self._control.pack(expand=True, fill="both", side="right")
+        self.wildcard = [[wildcard, ['*.' + _ for _ in wildcard.split(',')]]]
     
     # activate the browse button, which shows a native fileopen dialog and sets the Entry control
     def OnBrowse(self):
         flist = filedialog.askopenfilenames(filetypes=self.wildcard + [("*", "*")])
         if(isinstance(flist, tuple)):
-            self.set(",".join(flist))
+            slist = []
+            for n in flist:
+                if os.path.commonpath([n, os.getcwd()]) == os.getcwd():
+                    slist.append(os.path.relpath(n))
+                else:
+                    slist.append(n)
+            self.set(",".join(slist))
     
     def get(self):
         return(self._control.get())
@@ -346,52 +472,75 @@ class FileEntry(ttk.Frame):
         self._control.insert(0, value)
 
 # create a table of entry/combobox widgets
-class tkTable(list, ttk.Frame):
-    def __init__(self, master, name=None):
-        ttk.Frame.__init__(self, master, name=name)
-        list.__init__(self)
-        self.configure({'borderwidth': 10, 'relief': 'groove'})
-        self.pack(expand=True, fill="both", padx=20, pady=2)
-        self.clear()
+class tkTable(ttk.Labelframe):
+    def __init__(self, master, label, columns):
+        ttk.Labelframe.__init__(self, master, name=label, text=label)
+
+        self._label = label
+        if len(self._label) == 0:
+            self._label = str(self.winfo_id())
+        self._columns = [UsageToken(_) for _ in columns]
+        self._cells = []
+        ttk.Button(self, text="⛨", width=2, command=self.addRow).grid(row=99, column=0)
+        for i in range(len(self._columns)):
+            self.columnconfigure(i+1, weight=1)
+            ttk.Label(self, text=self._columns[i].name).grid(row=0, column=i+1)
+
+        self.addRow()
+        # ttk.Style().configure('style.TFrame', background='green')
+        # self['style'] = 'style.TFrame'
         
+    # return the table data as a serialized commalist
     def get(self, row=None, col=None):
-        value = commalist()
+        value = None
         # retrieve all values as a 2d list
         if(row==None and col==None):
             value = commalist()
-            for i in range(len(self)):
-                value.append([self[i][j].get() for j in range(len(self[i]))])
+            for i in range(len(self._cells)):
+                value.append([self.get(i, j) for j in range(len(self._columns))])
     
-        elif(row < len(self) and col < len(self[row])):
-            value = self[row][col].get()
-        return(value)
-    
-    # set the widget values, expanding the table as needed
+        elif(row < len(self._cells) and col < len(self._columns)):
+            value = self._cells[row][col+1].get()
+        return(str(value))
+
+    # set the widget values, expanding the table rows as needed
+    # input data must be a string containing a serialized commalist
     def set(self, data, row=None, col=0):
-        if(isinstance(data, list)):
+        if row is None:
+            data = commalist().parse(data)
             for i in range(len(data)):
                 if(isinstance(data[i], list)):
                     for j in range(len(data[i])):
                         self.set(data[i][j], i, j)
                 else:
                     self.set(data[i], i)
-        elif(row != None):
-            # expand internal array to fit all rows and columns
-            for i in range(len(self), row+1):
-                self.append([])
-                tk.Button(self, text="-", width=2, command=lambda: self.delRow(i)).grid(row=i, column=0, sticky="w")
-                for j in range(col+1):
-                    self[i].append(ttk.Combobox(self))
-                    self[i][j].grid(row=i, column=j+1)
-                    
-            for j in range(len(self[row]),col+1):
-                self[row].append(ttk.Combobox(self))
-                self[row][j].grid(row=row, column=j+1)
-
-            self[row][col].set(data)
+        else:
+            # expand internal array to fit the data
+            for i in range(len(self._cells), row+1):
+                self.addRow()
+            self._cells[row][col+1].set(data)
 
     def addRow(self):
-        self.set("", len(self), self.columnCount()-1)
+        row = len(self._cells)
+        self._cells.append([])
+        for col in range(len(self._columns)+1):
+            child = None
+            if col == 0:
+                child = ttk.Button(self, text="⛌", width=2, command=lambda: self.delRow(row))
+            else:
+                token = self._columns[col-1]
+                if(token.type == '@'):
+                    child = CheckBox(self, "%s_%s" % (token.name,row))
+                elif(token.type == '*'):
+                    child = FileEntry(self, "%s_%s" % (token.name,row), token.data)
+                elif(token.type == '='):
+                    child = LabelCombo(self, "%s_%s" % (token.name,row), token.data)
+                elif(token.type == ':'):
+                    child = ComboPicker(self, "%s_%s" % (token.name,row), token.data)
+                else:
+                    child = LabelEntry(self, "%s_%s" % (token.name,row))
+            child.grid(row=row+1, column=col, sticky="we")
+            self._cells[row].append(child)
     
     def delRow(self, index=0):
         buffer = self.get()
@@ -399,41 +548,183 @@ class tkTable(list, ttk.Frame):
         self.clear()
         self.set(buffer)
     
-    def columnCount(self):
-        if(len(self) > 0):
-            return(len(self[0]))
-        else:
-            return(1)
-    
     def clear(self):
-        del self[:]
-        self.append([])
-        for c in tuple(self.children.values()): c.destroy()
-        tk.Button(self, text="+", width=2, command=self.addRow).grid(row=99, column=0, sticky="w")
-        
-    def __str__(self):
-        return(ttk.Frame.__str__(self))
-       
+        for i in range(len(self._cells)-1,-1,-1):
+            for j in range(len(self._cells[i])-1,-1,-1):
+                self._cells[i][j].destroy()
+        del self._cells[:]
+
+def default_ico():
+    import tempfile, binascii
+    iconhexdata = \
+    '0000010001002020000001002000a8100000160000002800000020000000' \
+    '400000000100200000000000000000000000000000000000000000000000' \
+    '0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
+    '0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
+    '00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
+    '002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    '838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
+    'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
+    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
+    'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+    '1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
+    '002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
+    '3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+    '13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
+    'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
+    '13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
+    'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
+    '13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
+    'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
+    'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
+    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
+    'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
+    'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
+    '00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
+    '14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
+    '00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+    'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
+    'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
+    '07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
+    'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
+    'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
+    # create temp icon file, will be cleaned by tk.Tk destroy
+    iconfile = tempfile.NamedTemporaryFile(delete=False)
+    iconfile.write(binascii.a2b_hex(iconhexdata))
+    return iconfile.name
+
 # main frame
 class AppTk(tk.Tk):
     "TK-Based Data driven GUI application"
+    _iconfile_name = default_ico()
     def __init__(self, usage=None):
         tk.Tk.__init__(self)
-        # load the default icon if exists
-        if(os.path.exists('default.ico')):
-            self.iconbitmap(default='default.ico')
+        
+        self.iconbitmap(default=self._iconfile_name)
 
-        self.rowconfigure(0, weight=1)
+        # self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.createHeader()
-        # create the script dynamic frame with input controls related to that scripts
+        # create the script virtual frame with input controls related to that scripts
+        self.getLogo().grid(row=0, column=1, rowspan=3)
+        ttk.Button(self, text="Run", command=self.runScript).grid(row=2, column=1, rowspan=3, pady=20, padx=20)
         self.script = ScriptFrame(self, usage)
-        self.script.grid(row=0, column=0, sticky='we')
+        self.script.set(Settings().load())
+
         # build the script interface, and restore settings for any previous run
-        self.script.load()
         #self.scrollY = tk.Scrollbar( self, orient=tk.VERTICAL)
         #self.scrollY.grid(row=2, column=1, sticky='ns')
-        tk.Button(self, text="Run", command=self.runScript).grid(row=0, column=1, pady=20, padx=20, sticky="sew")
         self.createMenu()
 
     def createMenu(self):
@@ -454,7 +745,7 @@ class AppTk(tk.Tk):
         menu_help.add_command(label='About...', command=self.showAbout)
 
     # custom function to populate the widgets for this application
-    def createHeader(self):
+    def getLogo(self):
         # if we dont store the image in a variable, it will be garbage colected before being displayed
         canvas = tk.Canvas(self)
         # draw a Vale logo
@@ -463,15 +754,9 @@ class AppTk(tk.Tk):
         canvas['height'] = 100
         canvas['width'] = 100
         canvas.scale("all", 0, 0, 0.1, 0.1)
-        canvas.grid(row=0, column=1, sticky="n")
-        
-        # create a combobox with all script found
-        # tk.Label(self, text="Graphic User Interface for command line scripts").grid(row=0, sticky='w')
-        # tk.Label(self, text=sys.argv[0]).grid(row=1, column=1)
-        # ttk.Separator(self).grid(sticky='we')
+        return canvas
             
     def runScript(self):
-        print("runScript")
         ClientScript.run(self.script)
 
     def showHelp(self):
@@ -495,12 +780,23 @@ class AppTk(tk.Tk):
         if len(result) == 0:
             return
         Settings(result).save(self.script.get())
+    
+    def destroy(self):
+        Settings().save(self.script.get())
+        os.remove(self._iconfile_name)
+        tk.Tk.destroy(self)
 
-def gui(usage):
-    AppTk(usage).mainloop()
-
-# main app loop
-if __name__=="__main__":
+# default main for when this script is standalone
+# when this as a library, will redirect to the caller script main()
+def main(*args):
+    if (__name__ != '__main__'):
+        from __main__ import main
+        # redirect to caller script main
+        main(*args)
+        return
+    # run standalone main code
     print(__name__)
-    app = AppTk()
-    app.mainloop()
+    print(args)
+
+if __name__=="__main__":
+  usage_gui(None)
