@@ -3,6 +3,9 @@ Data driven gui toolkit for scripts in other languages or python business logic.
 It tries to fill a role similar to guidata python module but is even simpler and with distictive features, the most proeminent that it can be used with scripts in languages other than python.
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
+## Screenshot
+![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
+
 ## Features
  - A graphical user interface generated from a simple one line template
  - Dynamic lists for the comboboxes, capable of reading fields from csv and xlsx files.
@@ -22,9 +25,6 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
    - Unix C Shell (.csh)
    - Windows Scripting Host (.vbs, .js)
  
-## Screenshot
-![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
-
 ## How to use
 ### File name matters
 The interface searches in the current working directory for all files that have the same base name, and are of a supported extension.
