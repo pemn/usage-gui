@@ -189,14 +189,16 @@ class smartfilelist(object):
         return(smartfilelist._cache[input_path])
 
 class ClientScript(list):
-    "Handles the script with the same name as this inteface file"
+    "Handles the script with the same name as this interface file"
     # magic signature that a script file must have for defining its gui
     _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
     _usage = None
     _file = sys.argv[0]
     _type = None
     _base = os.path.splitext(sys.argv[0])[0]
-    for ext in ['csh','lava','pl','bat']:
+    # HARDCODED list of supporte file types
+    # to add a new file type, just add it to the list
+    for ext in ['csh','lava','pl','bat','vbs','js']:
         if os.path.exists(_base + '.' + ext):
             _file = _base + '.' + ext
             _type = ext.lower()
@@ -725,6 +727,7 @@ class AppTk(tk.Tk):
     _iconfile_name = default_ico()
     def __init__(self, usage=None):
         tk.Tk.__init__(self)
+        self.title(ClientScript._base)
         
         self.iconbitmap(default=self._iconfile_name)
 
