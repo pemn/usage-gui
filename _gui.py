@@ -190,9 +190,11 @@ class smartfilelist(object):
 
 class ClientScript(list):
     "Handles the script with the same name as this inteface file"
+    # magic signature that a script file must have for defining its gui
+    _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
+    _usage = None
     _file = sys.argv[0]
     _type = None
-    _usage = None
     _base = os.path.splitext(sys.argv[0])[0]
     for ext in ['csh','lava','pl','bat']:
         if os.path.exists(_base + '.' + ext):
@@ -241,11 +243,17 @@ class ClientScript(list):
         r = []
         if usage is None and cls._file is not None:
             usage = cls.parse()
+        print("a",usage)
+        if usage:
+            m = re.search(cls._magic, usage, re.IGNORECASE)
+            if(m):
+                cls._usage = m.group(1)
         
-        if usage is None or len(usage) == 0:
+        print(cls._usage)
+        if cls._usage is None or len(cls._usage) == 0:
             r = ['arguments']
         else:
-            r = usage.split()
+            r = cls._usage.split()
         return(r)
 
     @classmethod
@@ -257,12 +265,9 @@ class ClientScript(list):
         if os.path.exists(cls._file):
             with open(cls._file, 'r') as file:
                 for line in file:
-                    if ("usage:" in line.lower()):
-                        m = re.search(r"usage:\s*\S+\s*([^\"\'\\]+)", line, re.IGNORECASE)
-                        if(m):
-                            cls._usage = m.group(1)
-                            break
-        return cls._usage
+                    if re.match(cls._magic, line, re.IGNORECASE):
+                        return(line)
+        return None
 
 class UsageToken(str):
     _name = None
@@ -315,26 +320,34 @@ class ScriptFrame(list):
     def children(self):
         return self
 
-    def get(self):
+    def get(self, labels=False):
+        if labels:
+            return dict([[_.winfo_name(), _.get()] for _ in self])
         return [_.get() for _ in self]
     
     def getArgs(self):
         args = ''
         for n in self:
             arg = str(n.get())
-            if '"' not in arg and (' ' in arg or ';' in arg):
+            if len(arg) == 0 or '"' not in arg and (' ' in arg or ';' in arg):
                 arg = '"' + arg + '"'
             args += " " + arg
         return(args)
     
     def set(self, values):
-        for i in range(min(len(self), len(values))):
-            self[i].set(values[i])
+        if isinstance(values, dict):
+            for n in self:
+                k = n.winfo_name()
+                if k in values:
+                    n.set(values[k])
+        else:
+            for i in range(min(len(self), len(values))):
+                self[i].set(values[i])
 
     def buildControl(self, token):
         result = None
         if(token.type == '@'):
-            result = CheckBox(self.master, token.name)
+            result = CheckBox(self.master, token.name, bool(token.data))
         elif(token.type == '*'):
             result = FileEntry(self.master, token.name, token.data)
         elif(token.type == '='):
@@ -379,7 +392,7 @@ class CheckBox(ttk.Checkbutton):
         ttk.Checkbutton.__init__(self, master, name=label, text=label, variable=self._variable)
     
     def get(self):
-        return(self._variable.get())
+        return(int(self._variable.get()))
         
     def set(self, value):
         return(self._variable.set(value))
@@ -387,6 +400,7 @@ class CheckBox(ttk.Checkbutton):
 class LabelCombo(ttk.Frame):
     def __init__(self, master, label, source=None):
         ttk.Frame.__init__(self, master, name=label)
+        self._source = source
         if isinstance(master, tkTable):
             self._control = ttk.Combobox(self)
         else:
@@ -423,8 +437,8 @@ class ComboPicker(LabelCombo):
             if (self._source in self.master.master.children):
                 source_widget = self.master.master.nametowidget(self._source)
             else:
-                row,_,_ = self.winfo_name().rpartition("_")
-                if len(row) and self._source + "_" + row in self.master.children:
+                _,_,row = self.winfo_name().rpartition("_")
+                if self._source + "_" + row in self.master.children:
                     source_widget = self.master.nametowidget(self._source + "_" + row)
         elif (self._source in self.master.children):
             source_widget = self.master.nametowidget(self._source)
@@ -530,7 +544,7 @@ class tkTable(ttk.Labelframe):
             else:
                 token = self._columns[col-1]
                 if(token.type == '@'):
-                    child = CheckBox(self, "%s_%s" % (token.name,row))
+                    child = CheckBox(self, "%s_%s" % (token.name,row), bool(token.data))
                 elif(token.type == '*'):
                     child = FileEntry(self, "%s_%s" % (token.name,row), token.data)
                 elif(token.type == '='):
@@ -779,10 +793,10 @@ class AppTk(tk.Tk):
         result = filedialog.asksaveasfilename(filetypes=[("ini", "*.ini")])
         if len(result) == 0:
             return
-        Settings(result).save(self.script.get())
+        Settings(result).save(self.script.get(True))
     
     def destroy(self):
-        Settings().save(self.script.get())
+        Settings().save(self.script.get(True))
         os.remove(self._iconfile_name)
         tk.Tk.destroy(self)
 
