@@ -6,11 +6,13 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
 ## Features
  - A graphical user interface generated from a simple one line template
  - Dynamic lists for the comboboxes, capable of reading fields from csv and xlsx files.
- - Can be packaged into a exe
+ - Data persistence and save/load of panel settings using .ini files.
+ - Copy the full script command line to clipboard, so you can run it on enviroments without a display (Ex.: telnet/ssh).
+ - Can be packaged into a standalone exe.
  - Uses the ubiquitous and mature Tkinter for the backend rendering
- - All dependencies used are bungled by default on the most popular python installations distributions.
+ - All modules used are bundled by default on the most popular python distributions.
  - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
- - Can easily be embedded with business logic to create a single file standalone solution, even without packaing (single .py file)
+ - Can easily be embedded with business logic to create a single file standalone solution, even without packaging (single .py file)
  - Open Source as detailed in the license
  - Flexible. Can be used with any script whose source files are ASCII files.
  - Supported file types out of the box (more can be easily added just by editing the hardcoded list):
@@ -27,12 +29,12 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
 ### File name matters
 The interface searches in the current working directory for all files that have the same base name, and are of a supported extension.
 Ex.: "myscript.py" will match a file named "myscript.bat" if it exists.  
-If the interface cant locate a supported file, it will run the embedded business logic, with by default is just a "print" of the arguments.
+If the interface cant locate a supported file, it will run the embedded business logic, with by default is just a "print" of the arguments.  
 
 
 ### The `usage:` line
-Once the interface finds a compatible script, it will do a text search on the contents of this file looking for a magic word: `usage:`  
-When it is found, its line is parsed into interface controls using the templates described below. This `usage:` can be a comment or, even better, can be the short help message describing its usage. Its common for a script to print their parameter syntax when called with a switch such as `/?` and `-h` or without any arguments. The origin of this interface was trying to "guess" a good control layout from existing usage lines. Conforming any already existing usage line to the templates should have no downsides and will even look informative.
+Once the interface finds a compatible script, it will do a text search on the contents of this file looking for the magic word: `usage:`.   
+When it is found, the line containing is parsed into interface controls using the templates described below. This `usage:` can be a comment or, even better, can be the short help message describing the script expected parameters. Its common for a script to print their parameter syntax when called with a switch such as `/?` and `-h` or without any arguments. The origin of this interface was trying to "guess" a good control layout from existing usage lines. Conforming any already existing usage line to the templates should have no downsides and will even look informative.
 
 ### Control templates
 - `<name>=<default value>`  
