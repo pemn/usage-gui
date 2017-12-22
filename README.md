@@ -4,10 +4,11 @@ It tries to fill a role similar to guidata python module but is even simpler and
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Features
- - Simple one line templates
+ - A graphical user interface generated from a simple one line template
+ - Dynamic lists for the comboboxes, capable of reading fields from csv and xlsx files.
  - Can be packaged into a exe
  - Uses the ubiquitous and mature Tkinter for the backend rendering
- - All dependencies used are in most standard python installations
+ - All dependencies used are bungled by default on the most popular python installations distributions.
  - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
  - Can easily be embedded with business logic to create a single file standalone solution, even without packaing (single .py file)
  - Open Source as detailed in the license
