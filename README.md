@@ -13,13 +13,12 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
  - Can easily be embedded with business logic to create a single file standalone solution, even without packaing (single .py file)
  - Open Source as detailed in the license
  - Flexible. Can be used with any script whose source files are ASCII files.
- - Supported file types out of the box:
+ - Supported file types out of the box (more can be easily added just by editing the hardcoded list):
+   - Python (.py but using the business logic main function)
    - Perl (.pl, .lava)
-   - Python (.py)
-   - Windows Batch (.bat, .cmd)
+   - Windows Batch (.bat)
    - Unix C Shell (.csh)
    - Windows Scripting Host (.vbs, .js)
- 
  
 ## Screenshot
 ![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
