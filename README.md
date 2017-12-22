@@ -20,7 +20,7 @@ Its a pure python implementation of my similar C++ project [ScriptGui](github.co
  
  
 ## Screenshot
-![screenshot](github.com/pemn/usage-gui/blob/master/assets/example1.PNG)
+![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.PNG)
 
 ## How to use
 ### File name matters
