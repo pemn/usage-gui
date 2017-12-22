@@ -20,7 +20,8 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
  
  
 ## Screenshot
-![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.PNG)
+`usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label logical1@ logical2@1 static_choice=red,green,blue table1#variable:input_csv table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg`
+![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
 
 ## How to use
 ### File name matters
