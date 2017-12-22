@@ -1,6 +1,7 @@
 # usage-gui
-Data driven gui toolkit for scripts in other languages or python business logic.
-Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)
+Data driven gui toolkit for scripts in other languages or python business logic.  
+It tries to fill a role similar to guidata python module but is even simpler and with distictive features, the most proeminent that it can be used with scripts in languages other than python.
+Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Features
  - Simple one line templates
@@ -20,7 +21,6 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
  
  
 ## Screenshot
-`usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label logical1@ logical2@1 static_choice=red,green,blue table1#variable:input_csv table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg`
 ![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
 
 ## How to use
@@ -53,8 +53,8 @@ the resulting list is semicollon separated (`;`)
 multiple controls can be used in a single line, and columns in each row will be comma (`,`) separated  
 Ex.: a,1;b,2;c,3  
 
-### Example of a "usage:" line
-`usage: %0 input*csv selection=a,b,c numeric=123 boolean@ output*csv`  
+### Example of the "usage:" line which was used to create the screenshot above
+`usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label logical1@1 logical2@ static_choice=red,green,blue table1#variable:input_csv table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg`
 
 
 ## License
