@@ -17,31 +17,27 @@ limitations under the License.
 You can contribute to the main repository at
 
 https://github.com/pemn/usage-gui
-
-
 """
 # _gui.py
-# auxiliary functions for data input/output
-# data driven gui
+# auxiliary functions for data input/output and data driven gui
 
 ### COMMON ###
 
 import sys, os, os.path
-import pandas as pd
 
 # this function handles most of the details required when using a exe interface
 def usage_gui(usage = None):
   # we already have argument, just proceed with execution
   if(len(sys.argv) > 1):
-    main(*sys.argv[1:])
-  else:
-    # check if a exe file with same name as this script exists
-    exe = os.path.splitext(sys.argv[0])[0] + ".exe"
-    if(os.path.isfile(exe)):
-      # call the exe interface which later may call this script as another process
-      os.system(exe)
+    # traps help switches: /? -? /h -h /help -help
+    if(usage is not None and re.match(r'[\-/](?:\?|h|help)$', sys.argv[1])):
+      print(usage)
+    elif 'main' in locals():
+      main(*sys.argv[1:])
     else:
-      AppTk(usage).mainloop()
+      print("main() not found")
+  else:
+    AppTk(usage).mainloop()
 
 # convenience function to return a dataframe base on the input file extension
 # bmf: vulcan block model
@@ -49,6 +45,7 @@ def usage_gui(usage = None):
 # csv: ascii table
 # xls: excel table
 def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
+  import pandas as pd
   df = pd.DataFrame()
   if input_path.lower().endswith('csv'):
     df = pd.read_csv(input_path)
@@ -109,6 +106,90 @@ import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
 import pickle
 import subprocess
+
+
+class ClientScript(list):
+    "Handles the script with the same name as this interface file"
+    # magic signature that a script file must have for defining its gui
+    _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
+    _usage = None
+    _file = sys.argv[0]
+    _type = None
+    _base = os.path.splitext(sys.argv[0])[0]
+    # HARDCODED list of supporte file types
+    # to add a new file type, just add it to the list
+    for ext in ['csh','lava','pl','bat','vbs','js']:
+        if os.path.exists(_base + '.' + ext):
+            _file = _base + '.' + ext
+            _type = ext.lower()
+            break
+
+    @classmethod
+    def exe(cls):
+        if cls._type == "lava":
+            return "perl"
+        if cls._type == "csh":
+            return "csh"
+        if cls._type == "bat":
+            return "cmd"
+        if cls._type is None:
+            return "python"
+        return None
+
+    @classmethod
+    def run(cls, script):
+        if cls._type is None:
+            # call the main on the caller script with the arguments as a python dict
+            main(*script.get())
+        else:
+            # create a new process and passes the arguments on the command line
+            #process = subprocess.Popen(argv, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
+            process = subprocess.Popen([cls.exe(), cls._file, script.getArgs()])
+
+    @classmethod
+    def type(cls):
+        return cls._type
+    
+    @classmethod
+    def base(cls):
+        return cls._base
+    
+    @classmethod
+    def file(cls, ext = None):
+        if ext is not None:
+            return cls._base + '.' + ext
+        return cls._file
+    
+    @classmethod
+    def args(cls, usage = None):
+        r = []
+        if usage is None and cls._type is not None:
+            usage = cls.parse()
+
+        if usage:
+            m = re.search(cls._magic, usage, re.IGNORECASE)
+            if(m):
+                cls._usage = m.group(1)
+        
+        if cls._usage is None or len(cls._usage) == 0:
+            r = ['arguments']
+        else:
+            r = cls._usage.split()
+        return(r)
+
+    @classmethod
+    def fields(cls, usage = None):
+        return [re.match(r"^\w+", _).group(0) for _ in cls.args(usage)]
+
+    @classmethod
+    def parse(cls):
+        if os.path.exists(cls._file):
+            with open(cls._file, 'r') as file:
+                for line in file:
+                    if re.search(cls._magic, line, re.IGNORECASE):
+                        return(line)
+        return None
+
 
 class Settings(str):
     "provide persistence for control values using pickled ini files"
@@ -187,89 +268,6 @@ class smartfilelist(object):
             smartfilelist._cache[input_path] = []
     
         return(smartfilelist._cache[input_path])
-
-class ClientScript(list):
-    "Handles the script with the same name as this interface file"
-    # magic signature that a script file must have for defining its gui
-    _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
-    _usage = None
-    _file = sys.argv[0]
-    _type = None
-    _base = os.path.splitext(sys.argv[0])[0]
-    # HARDCODED list of supporte file types
-    # to add a new file type, just add it to the list
-    for ext in ['csh','lava','pl','bat','vbs','js']:
-        if os.path.exists(_base + '.' + ext):
-            _file = _base + '.' + ext
-            _type = ext.lower()
-            break
-
-    @classmethod
-    def exe(cls):
-        if cls._type == "lava":
-            return "perl"
-        if cls._type == "csh":
-            return "csh"
-        if cls._type == "bat":
-            return "cmd"
-        if cls._type is None:
-            return "python"
-        return None
-
-    @classmethod
-    def run(cls, script):
-        if cls._type is None:
-            # call the main on the caller script with the arguments as a python dict
-            main(*script.get())
-        else:
-            # create a new process and passes the arguments on the command line
-            #process = subprocess.Popen(argv, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
-            process = subprocess.Popen([cls.exe(), cls._file, script.getArgs()])
-
-    @classmethod
-    def type(cls):
-        return cls._type
-    
-    @classmethod
-    def base(cls):
-        return cls._base
-    
-    @classmethod
-    def file(cls, ext = None):
-        if ext is not None:
-            return cls._base + '.' + ext
-        return cls._file
-    
-    @classmethod
-    def args(cls, usage = None):
-        r = []
-        if usage is None and cls._file is not None:
-            usage = cls.parse()
-        print("a",usage)
-        if usage:
-            m = re.search(cls._magic, usage, re.IGNORECASE)
-            if(m):
-                cls._usage = m.group(1)
-        
-        print(cls._usage)
-        if cls._usage is None or len(cls._usage) == 0:
-            r = ['arguments']
-        else:
-            r = cls._usage.split()
-        return(r)
-
-    @classmethod
-    def fields(cls, usage = None):
-        return [re.match(r"^\w+", _).group(0) for _ in cls.args(usage)]
-
-    @classmethod
-    def parse(cls):
-        if os.path.exists(cls._file):
-            with open(cls._file, 'r') as file:
-                for line in file:
-                    if re.match(cls._magic, line, re.IGNORECASE):
-                        return(line)
-        return None
 
 class UsageToken(str):
     _name = None
@@ -814,6 +812,8 @@ def main(*args):
     # run standalone main code
     print(__name__)
     print(args)
+    messagebox.showinfo(message='Business Logic placeholder')
+
 
 if __name__=="__main__":
   usage_gui(None)
