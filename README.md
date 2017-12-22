@@ -1,6 +1,6 @@
 # usage-gui
 Data driven gui toolkit for scripts in other languages or python business logic.
-Its a pure python implementation of my similar C++ project github.com/pemn/ScriptGui
+Its a pure python implementation of my similar C++ project [ScriptGui](github.com/pemn/ScriptGui)
 
 ## Features
  - Simple one line templates
@@ -20,7 +20,7 @@ Its a pure python implementation of my similar C++ project github.com/pemn/Scrip
  
  
 ## Screenshot
-![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.PNG)
+![screenshot](github.com/pemn/usage-gui/blob/master/assets/example1.PNG)
 
 ## How to use
 ### File name matters
