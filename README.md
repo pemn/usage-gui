@@ -1,7 +1,7 @@
 # usage-gui
 Data driven gui toolkit for scripts in other languages or python business logic.  
 It tries to fill a role similar to guidata python module but is even simpler and with distictive features.
-**It can be used with scripts in languages other than python.**  
+**Also, unlike guidata, it can be used with scripts in languages other than python.**  
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Screenshot
@@ -9,11 +9,11 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
 
 ## Features
  - A graphical user interface generated from a simple one line template
- - Dynamic lists for the comboboxes, capable of reading fields from csv and xlsx files.
+ - Dynamic lists for the comboboxes. Options can be defined inline or by reading fields from csv and xlsx files.
  - Data persistence and save/load of panel settings using .ini files.
  - Copy the full script command line to clipboard, so you can run it on enviroments without a display (Ex.: telnet/ssh).
  - Can be packaged into a standalone exe.
- - Uses the ubiquitous and mature Tkinter for the backend rendering
+ - Uses the ubiquitous and mature Tkinter (tcl/tk) for the backend rendering
  - All modules used are bundled by default on the most popular python distributions.
  - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
  - Can easily be embedded with business logic to create a single file standalone solution, even without packaging (single .py file)
