@@ -126,15 +126,17 @@ class ClientScript(list):
 
     @classmethod
     def exe(cls):
-        if cls._type == "lava":
-            return "perl"
         if cls._type == "csh":
-            return "csh"
+            return ["csh"]
         if cls._type == "bat":
-            return "cmd"
+            return ["cmd", "/c"]
+        if cls._type == "vbs" or cls._type == "js":
+            return ["cscript", "/nologo"]
+        if cls._type == "lava" or cls._type == "pl":
+            return ["perl"]
         if cls._type is None:
-            return "python"
-        return None
+            return ["python"]
+        return []
 
     @classmethod
     def run(cls, script):
@@ -144,7 +146,9 @@ class ClientScript(list):
         else:
             # create a new process and passes the arguments on the command line
             #process = subprocess.Popen(argv, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
-            process = subprocess.Popen([cls.exe(), cls._file, script.getArgs()])
+            print(cls.exe() + [cls._file] + script.getArgs())
+            process = subprocess.Popen(cls.exe() + [cls._file] + script.getArgs())
+            #process = subprocess.Popen(['cmd.exe', '/c', cls._file, 'a', 'b', 'c'])
 
     @classmethod
     def type(cls):
@@ -310,11 +314,11 @@ class ScriptFrame(list):
 
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
-        cmd = "%s %s %s" % (ClientScript.exe(), ClientScript.file(), self.getArgs())
+        cmd = " ".join(ClientScript.exe() + [ClientScript.file()] + self.getArgs())
         print(cmd)
         self.master.clipboard_clear()
         self.master.clipboard_append(cmd)
-        self.master.update()
+        #self.master.clipboard_get()
         messagebox.showinfo(message='Command line copied to clipboard')
 
     def children(self):
@@ -326,12 +330,12 @@ class ScriptFrame(list):
         return [_.get() for _ in self]
     
     def getArgs(self):
-        args = ''
+        args = []
         for n in self:
             arg = str(n.get())
             if len(arg) == 0 or '"' not in arg and (' ' in arg or ';' in arg):
                 arg = '"' + arg + '"'
-            args += " " + arg
+            args.append(arg)
         return(args)
     
     def set(self, values):
