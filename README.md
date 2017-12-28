@@ -1,7 +1,7 @@
 # usage-gui
 Data driven gui toolkit for scripts in other languages or python business logic.  
 It tries to fill a role similar to guidata python module but is even simpler and with distictive features.
-**Also, unlike guidata, it can be used with scripts in languages other than python.**  
+**Also, unlike guidata, it can be used to run scripts in languages other than python.**  
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Screenshot
@@ -46,7 +46,7 @@ choice combo box
 file browse control, listing only files that match one of the given extensions
 - `<name>:<another control name>`  
 derived control that gets its list values from the file pointed by another file browse control  
-different files will have differente associated lists  
+different files will have different associated lists, generated on the fly  
 Ex.: csv files will be a list of column names  
 - `<name>@<default value>`  
 checkbox boolean control
@@ -56,7 +56,7 @@ the resulting list is semicollon separated (`;`)
 multiple controls can be used in a single line, and columns in each row will be comma (`,`) separated  
 Ex.: a,1;b,2;c,3  
 
-### Example of the "usage:" line which was used to create the screenshot above
+### Example of the "usage:" line which should create a panel like the screenshot above
 `usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label logical1@1 logical2@ static_choice=red,green,blue table1#variable:input_csv table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg`
 
 
