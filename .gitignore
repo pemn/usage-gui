@@ -99,3 +99,7 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# batch frontends
+.cmd
+
