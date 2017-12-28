@@ -32,7 +32,7 @@ def usage_gui(usage = None):
     # traps help switches: /? -? /h -h /help -help
     if(usage is not None and re.match(r'[\-/](?:\?|h|help)$', sys.argv[1])):
       print(usage)
-    elif 'main' in locals():
+    elif 'main' in globals():
       main(*sys.argv[1:])
     else:
       print("main() not found")
@@ -318,8 +318,8 @@ class ScriptFrame(list):
         print(cmd)
         self.master.clipboard_clear()
         self.master.clipboard_append(cmd)
-        #self.master.clipboard_get()
-        messagebox.showinfo(message='Command line copied to clipboard')
+        # workaround due to tkinter clearing clipboard on exit
+        messagebox.showinfo(message='Command line copied to clipboard.\nWill be cleared after interface closes.')
 
     def children(self):
         return self
@@ -737,7 +737,7 @@ class AppTk(tk.Tk):
         self.columnconfigure(0, weight=1)
         # create the script virtual frame with input controls related to that scripts
         self.getLogo().grid(row=0, column=1, rowspan=3)
-        ttk.Button(self, text="Run", command=self.runScript).grid(row=2, column=1, rowspan=3, pady=20, padx=20)
+        ttk.Button(self, text="Run ✔", command=self.runScript).grid(row=2, column=1, rowspan=3, pady=20, padx=20)
         self.script = ScriptFrame(self, usage)
         self.script.set(Settings().load())
 
