@@ -793,6 +793,7 @@ class AppTk(tk.Tk):
             
     def runScript(self):
         ClientScript.run(self.script)
+        messagebox.showinfo(message='Finished',title=ClientScript.file())
 
     def showHelp(self):
         script_pdf = ClientScript.file('pdf')
