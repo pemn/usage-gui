@@ -409,7 +409,8 @@ class LabelCombo(ttk.Frame):
             ttk.Label(self, text=label, width=-20).pack(side="left")
 
         self._control.pack(expand=True, fill="both", side="right")
-        self._control.bind("<ButtonPress>", self.ButtonPress)
+        if source is not None:
+            self.setValues(source.split(","))
 
     def get(self):
         return(self._control.get())
@@ -419,16 +420,19 @@ class LabelCombo(ttk.Frame):
     
     def setValues(self, values):
         self._control['values'] = values
+        # MAGIC: if only one value in the list, use it as default
+        if (len(values) == 1):
+            self.set(values[0])
+        # MAGIC: if any of the values is the same name as the control, select it
+        for _ in values:
+            if _.lower() == self.winfo_name():
+                self.set(_)
     
-    # placeholder for the ButtonPress event handler
-    def ButtonPress(self, *args):
-        if self._source is not None:
-            self.setValues(self._source.split(","))
-
 class ComboPicker(LabelCombo):
     def __init__(self, master, label, source):
-        LabelCombo.__init__(self, master, label, source)
+        LabelCombo.__init__(self, master, label)
         self._source = source
+        self._control.bind("<ButtonPress>", self.ButtonPress)
         
     def ButtonPress(self, *args):
         # temporarily set the cursor to a hourglass
@@ -481,6 +485,9 @@ class FileEntry(ttk.Frame):
 
     def ButtonPress(self, *args):
         # temporarily set the cursor to a hourglass
+        if (len(self._control['values'])):
+            return
+
         self._control['cursor'] = 'watch'
         
         wildcard_regex = '\.(?:' + '|'.join(self._wildcard_list) + ')$'

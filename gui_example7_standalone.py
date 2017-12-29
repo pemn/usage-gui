@@ -1,5 +1,5 @@
 #!python
-"""
+'''
 Copyright 2017 Vale
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +17,7 @@ limitations under the License.
 You can contribute to the main repository at
 
 https://github.com/pemn/usage-gui
-"""
+'''
 # _gui.py
 # auxiliary functions for data input/output and data driven gui
 
@@ -409,7 +409,8 @@ class LabelCombo(ttk.Frame):
             ttk.Label(self, text=label, width=-20).pack(side="left")
 
         self._control.pack(expand=True, fill="both", side="right")
-        self._control.bind("<ButtonPress>", self.ButtonPress)
+        if source is not None:
+            self.setValues(source.split(","))
 
     def get(self):
         return(self._control.get())
@@ -419,16 +420,19 @@ class LabelCombo(ttk.Frame):
     
     def setValues(self, values):
         self._control['values'] = values
+        # MAGIC: if only one value in the list, use it as default
+        if (len(values) == 1):
+            self.set(values[0])
+        # MAGIC: if any of the values is the same name as the control, select it
+        for _ in values:
+            if _.lower() == self.winfo_name():
+                self.set(_)
     
-    # placeholder for the ButtonPress event handler
-    def ButtonPress(self, *args):
-        if self._source is not None:
-            self.setValues(self._source.split(","))
-
 class ComboPicker(LabelCombo):
     def __init__(self, master, label, source):
-        LabelCombo.__init__(self, master, label, source)
+        LabelCombo.__init__(self, master, label)
         self._source = source
+        self._control.bind("<ButtonPress>", self.ButtonPress)
         
     def ButtonPress(self, *args):
         # temporarily set the cursor to a hourglass
@@ -458,16 +462,18 @@ class FileEntry(ttk.Frame):
         ttk.Frame.__init__(self, master, name=label)
         ttk.Button(self, text="⛘", command=self.OnBrowse).pack(side="right")
         if isinstance(master, tkTable):
-            self._control = ttk.Entry(self)
+            self._control = ttk.Combobox(self)
         else:
-            self._control = ttk.Entry(self, width=60)
+            self._control = ttk.Combobox(self, width=60)
             ttk.Label(self, text=label, width=-20).pack(side="left")
         self._control.pack(expand=True, fill="both", side="right")
-        self.wildcard = [[wildcard, ['*.' + _ for _ in wildcard.split(',')]]]
+        self._control.bind("<ButtonPress>", self.ButtonPress)
+        self._wildcard_list = wildcard.split(',')
+        self._wildcard_full = ((wildcard, ['*.' + _ for _ in self._wildcard_list]), ("*", "*"))
     
     # activate the browse button, which shows a native fileopen dialog and sets the Entry control
     def OnBrowse(self):
-        flist = filedialog.askopenfilenames(filetypes=self.wildcard + [("*", "*")])
+        flist = filedialog.askopenfilenames(filetypes=self._wildcard_full)
         if(isinstance(flist, tuple)):
             slist = []
             for n in flist:
@@ -476,7 +482,20 @@ class FileEntry(ttk.Frame):
                 else:
                     slist.append(n)
             self.set(",".join(slist))
-    
+
+    def ButtonPress(self, *args):
+        # temporarily set the cursor to a hourglass
+        if (len(self._control['values'])):
+            return
+
+        self._control['cursor'] = 'watch'
+        
+        wildcard_regex = '\.(?:' + '|'.join(self._wildcard_list) + ')$'
+        self._control['values'] = [_ for _ in os.listdir('.') if re.search(wildcard_regex, _)]
+
+        # reset the cursor back to default
+        self._control['cursor'] = ''
+
     def get(self):
         return(self._control.get())
     
@@ -814,3 +833,5 @@ def main(*args):
     print(__name__)
     print(args)
     messagebox.showinfo(message='Business Logic placeholder')
+
+usage_gui("usage: $0 input*csv output*txt")
