@@ -219,8 +219,11 @@ class commalist(list):
     _colfs = ","
     def parse(self, arg):
         "fill this instance with data from a string"
-        for row in arg.split(self._rowfs):
-            self.append(row.split(self._colfs))
+        if isinstance(arg, commalist):
+            self = arg
+        else:
+            for row in arg.split(self._rowfs):
+                self.append(row.split(self._colfs))
         return self
 
     def __str__(self):
@@ -535,7 +538,7 @@ class tkTable(ttk.Labelframe):
     
         elif(row < len(self._cells) and col < len(self._columns)):
             value = self._cells[row][col+1].get()
-        return(str(value))
+        return(value)
 
     # set the widget values, expanding the table rows as needed
     # input data must be a string containing a serialized commalist
