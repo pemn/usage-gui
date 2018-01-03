@@ -1,7 +1,7 @@
 # usage-gui
 Data driven gui toolkit for scripts in other languages or python business logic.  
-It tries to fill a role similar to guidata python module but is even simpler and with distictive features.
-**Also, unlike guidata, it can be used to run scripts in languages other than python.**  
+It tries to fill a role similar to other python modules like guidata and Gooey but is even simpler and with distictive features.
+
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Screenshot
