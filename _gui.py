@@ -121,7 +121,7 @@ import pickle
 import subprocess
 
 class ClientScript(list):
-    "Handles the script with the same name as this interface file"
+    '''Handles the script with the same name as this interface file'''
     # magic signature that a script file must have for defining its gui
     _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
     _usage = None
@@ -219,7 +219,7 @@ class ClientScript(list):
         return r
 
 class Settings(str):
-    "provide persistence for control values using pickled ini files"
+    '''provide persistence for control values using pickled ini files'''
     _ext = '.ini'
     def __new__(cls, value=''):
         if len(value) == 0:
@@ -322,6 +322,7 @@ class smartfilelist(object):
         return(smartfilelist._cache[input_path])
 
 class UsageToken(str):
+    '''handles the token format used to creating controls'''
     _name = None
     _type = None
     _data = None
@@ -344,18 +345,16 @@ class UsageToken(str):
     def data(self):
         return self._data
 
+
 class ScriptFrame(ttk.Frame):
-    "frame that holds the script argument controls"
+    '''frame that holds the script argument controls'''
     _tokens = None
     def __init__(self, master, usage = None):
         ttk.Frame.__init__(self, master)
+
         self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
         for t in self._tokens:
-            self.buildControl(t).pack(anchor="w", padx=20, pady=10)
-            #self.append(self.buildControl(self._tokens[i]))
-            #self[-1].grid(pady=10, padx=20, row=i, sticky="we")
-            # self[-1].pack(expand=True, fill=tk.BOTH)
-            #self[-1].pack(anchor="w", padx=20, pady=10)
+            self.buildControl(t).pack(anchor="w", padx=20, pady=10, fill="both")
             
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
@@ -421,7 +420,8 @@ class LabelEntry(ttk.Frame):
         if isinstance(master, tkTable):
             self._control = ttk.Entry(self)
         else:
-            self._control = ttk.Entry(self, width=60)
+            #self._control = ttk.Entry(self, width=60)
+            self._control = ttk.Entry(self)
             ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
 
         self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
@@ -455,7 +455,8 @@ class LabelCombo(ttk.Frame):
         if isinstance(master, tkTable):
             self._control = ttk.Combobox(self)
         else:
-            self._control = ttk.Combobox(self, width=60)
+            #self._control = ttk.Combobox(self, width=60)
+            self._control = ttk.Combobox(self, width=-60)
             ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
 
         self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
@@ -514,7 +515,8 @@ class FileEntry(ttk.Frame):
         if isinstance(master, tkTable):
             self._control = ttk.Combobox(self)
         else:
-            self._control = ttk.Combobox(self, width=60)
+            #self._control = ttk.Combobox(self, width=60)
+            self._control = ttk.Combobox(self, width=-60)
             ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
         self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
         self._control.bind("<ButtonPress>", self.ButtonPress)
@@ -640,7 +642,7 @@ class tkTable(ttk.Labelframe):
 
 # main frame
 class AppTk(tk.Tk):
-    "TK-Based Data driven GUI application"
+    '''TK-Based Data driven GUI application'''
     _iconfile_name = None
     def __init__(self, usage=None):
         root = tk.Tk.__init__(self)
@@ -651,41 +653,34 @@ class AppTk(tk.Tk):
 
         self.columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(root)
-
+        self.canvas = tk.Canvas(root, width=self.winfo_screenwidth() * 0.25)
         self.script = ScriptFrame(self.canvas, usage)
-        #self.frame = ttk.Frame(self.canvas)
         self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.vsb.set)
 
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.canvas.create_window((0,0), window=self.script, anchor="nw")
+        self.canvas_frame = self.canvas.create_window((0,0), window=self.script, anchor="nw")
 
         self.vsb.pack(side="left", fill="y")
         self.script.bind("<Configure>", self.onFrameConfigure)
+        self.canvas.bind('<Configure>', self.onCanvasConfigure)
 
         ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
         
         # if we dont store the image in a variable, it will be garbage colected before being displayed
-        canvas = tk.Canvas(self)
-        # draw a Custom logo
-        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
-        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
-        canvas['height'] = 100
-        canvas['width'] = 100
-        canvas.scale("all", 0, 0, 0.1, 0.1)
-        canvas.pack(side=tk.RIGHT, anchor="ne")
+        self.drawLogo().pack(side=tk.RIGHT, anchor="ne")
         ttk.Button(self, text="Run ✔", command=self.runScript).pack(side="left")
-
         
         self.createMenu()
         self.script.set(Settings().load())
 
+
+    def onCanvasConfigure(self, event):
+        self.canvas.itemconfig(self.canvas_frame, width = event.width)
+
     def onFrameConfigure(self, event):
         '''Reset the scroll region to encompass the inner frame'''
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        self.canvas['width'] = self.script.winfo_reqwidth()
-        #print(self.winfo_screenheight() * 0.8, self.frame.winfo_reqheight())
         self.canvas['height'] = min(self.winfo_screenheight() * 0.8, self.script.winfo_reqheight())
 
     def createMenu(self):
@@ -735,6 +730,16 @@ class AppTk(tk.Tk):
         Settings().save(self.script.get(True))
         os.remove(self._iconfile_name)
         tk.Tk.destroy(self)
+
+    def drawLogo(self):
+        canvas = tk.Canvas(self)
+        # draw a Custom logo
+        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
+        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+        canvas['height'] = 100
+        canvas['width'] = 100
+        canvas.scale("all", 0, 0, 0.1, 0.1)
+        return canvas
 
     def default_ico(self):
         import tempfile, binascii
