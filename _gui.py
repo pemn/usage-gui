@@ -55,11 +55,8 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
     import vulcan
     bm = vulcan.block_model(input_path)
 
-    if len(condition) > 0:
-      condition = '-C "%s"' % (condition)
-
     # get a DataFrame with block model data
-    df = bm.get_pandas(vl, condition)
+    df = bm.get_pandas(vl, bm_sanitize_condition(condition))
   elif input_path.lower().endswith('isis'):
     import vulcan
     db = vulcan.isisdb(input_path)
@@ -84,6 +81,22 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
 
   return(df)
 
+
+def bm_sanitize_condition(condition):
+  if len(condition) > 0:
+
+    # convert a raw condition into a actual block select string
+    if re.match(r'\s*\-', condition):
+        # condition is already a select syntax
+        pass
+    elif re.search(r'\.00t$', condition, re.IGNORECASE):
+        # bounding solid
+        condition = '-X -t "%s"' % (condition)
+    else:
+        condition = '-C "%s"' % (condition.replace('"', "'"))
+        
+  return condition
+
 # convert field names in the TABLE:FIELD to just FIELD
 def table_field(args, table=False):
   if isinstance(args, list):
@@ -106,7 +119,6 @@ import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
 import pickle
 import subprocess
-
 
 class ClientScript(list):
     "Handles the script with the same name as this interface file"
@@ -191,6 +203,20 @@ class ClientScript(list):
                         return(line)
         return None
 
+    @classmethod
+    def header(cls):
+        r = ""
+        if os.path.exists(cls._file):
+            with open(cls._file, 'r') as file:
+                for line in file:
+                    if(line.startswith('#!')):
+                        continue
+                    m = re.match(r'#\s*(.+)', line)
+                    if m:
+                        r += m.group(1) + "\n"
+                    else:
+                        break
+        return r
 
 class Settings(str):
     "provide persistence for control values using pickled ini files"
@@ -219,25 +245,42 @@ class commalist(list):
     _colfs = ","
     def parse(self, arg):
         "fill this instance with data from a string"
-        if isinstance(arg, commalist):
-            self = arg
-        else:
+        if isinstance(arg, str):
             for row in arg.split(self._rowfs):
                 self.append(row.split(self._colfs))
+        else:
+            self = commalist(arg)
+
         return self
 
     def __str__(self):
-        r = None
+        r = ""
+        # custom join
         for i in self:
             if(isinstance(i, list)):
                 i = self._colfs.join(i)
-            if(r == None):
-                r = i
-            else:
-                r += self._rowfs + i
+            if len(r) > 0:
+                r += self._rowfs
+            r += i
         return(r)
     def __hash__(self):
         return(len(self))
+
+    # sometimes we have one element, but that element is ""
+    # unless we override, this will evaluate as True
+    def __bool__(self):
+        return len(str(self)) > 0
+    # compatibility if the user try to treat us as a real string
+    def split(self, *args):
+        return [",".join(_) for _ in self]
+    
+    @staticmethod
+    def as_list(self):
+        pass
+
+    @staticmethod
+    def as_str(self):
+        pass
 
 def dgd_list_layers(input_path):
     import vulcan
@@ -261,10 +304,15 @@ class smartfilelist(object):
             # do nothing
             pass
         elif(os.path.exists(input_path)):
-            if(re.search("dgd\.isis$", input_path, re.IGNORECASE)):
+            if(input_path.lower().endswith(".dgd.isis")):
                 # list layers of dgd files
                 smartfilelist._cache[input_path] = dgd_list_layers(input_path)
-            elif(re.search("isis|bmf|csv|xls.?$", input_path, re.IGNORECASE)):
+            if(input_path.lower().endswith(".bmf")):
+                import vulcan
+                bm = vulcan.block_model(input_path)
+                smartfilelist._cache[input_path] = bm.field_list()
+                bm.close()
+            elif(re.search("isis|csv|xls.?$", input_path, re.IGNORECASE)):
                 # list columns of files handled by pd_get_dataframe
                 smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path).columns)
 
@@ -305,7 +353,9 @@ class ScriptFrame(list):
         self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
         for i in range(len(self._tokens)):
             self.append(self.buildControl(self._tokens[i]))
-            self[-1].grid(pady=10, padx=20, row=i, sticky="we")
+            #self[-1].grid(pady=10, padx=20, row=i, sticky="we")
+            # self[-1].pack(expand=True, fill=tk.BOTH)
+            self[-1].pack(anchor="w", padx=20, pady=10)
             
 
     @property
@@ -363,7 +413,25 @@ class ScriptFrame(list):
         else:
             result = LabelEntry(self.master, token.name)
         return result
+
+
+# should behave the same as Tix LabelEntry but with some customizations
+class BrandingFrame(ttk.Frame):
+    def __init__(self, master, about, run):
+        # create a container frame for the combo and label
+        ttk.Frame.__init__(self, master)
+        ttk.Label(self, text=about).pack(expand=True, fill=tk.BOTH, side=tk.BOTTOM)
         
+        # if we dont store the image in a variable, it will be garbage colected before being displayed
+        canvas = tk.Canvas(self)
+        # draw a Vale logo
+        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
+        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+        canvas['height'] = 100
+        canvas['width'] = 100
+        canvas.scale("all", 0, 0, 0.1, 0.1)
+        canvas.pack(side=tk.RIGHT)
+        ttk.Button(self, text="Run ✔", command=run).pack()
 
 # should behave the same as Tix LabelEntry but with some customizations
 class LabelEntry(ttk.Frame):
@@ -375,9 +443,9 @@ class LabelEntry(ttk.Frame):
             self._control = ttk.Entry(self)
         else:
             self._control = ttk.Entry(self, width=60)
-            ttk.Label(self, text=label, width=-20).pack(side="left")
+            ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
 
-        self._control.pack(expand=True, fill="both", side="right")
+        self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
         
     def get(self):
         return(self._control.get())
@@ -409,9 +477,9 @@ class LabelCombo(ttk.Frame):
             self._control = ttk.Combobox(self)
         else:
             self._control = ttk.Combobox(self, width=60)
-            ttk.Label(self, text=label, width=-20).pack(side="left")
+            ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
 
-        self._control.pack(expand=True, fill="both", side="right")
+        self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
         if source is not None:
             self.setValues(source.split(","))
 
@@ -463,13 +531,13 @@ class FileEntry(ttk.Frame):
     "custom Entry, with label and a Browse button"
     def __init__(self, master, label, wildcard=None):
         ttk.Frame.__init__(self, master, name=label)
-        ttk.Button(self, text="⛘", command=self.OnBrowse).pack(side="right")
+        ttk.Button(self, text="⛘", command=self.OnBrowse).pack(side=tk.RIGHT)
         if isinstance(master, tkTable):
             self._control = ttk.Combobox(self)
         else:
             self._control = ttk.Combobox(self, width=60)
-            ttk.Label(self, text=label, width=-20).pack(side="left")
-        self._control.pack(expand=True, fill="both", side="right")
+            ttk.Label(self, text=label, width=-20).pack(side=tk.LEFT)
+        self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
         self._control.bind("<ButtonPress>", self.ButtonPress)
         self._wildcard_list = wildcard.split(',')
         self._wildcard_full = ((wildcard, ['*.' + _ for _ in self._wildcard_list]), ("*", "*"))
@@ -529,7 +597,7 @@ class tkTable(ttk.Labelframe):
         
     # return the table data as a serialized commalist
     def get(self, row=None, col=None):
-        value = None
+        value = ""
         # retrieve all values as a 2d list
         if(row==None and col==None):
             value = commalist()
@@ -591,179 +659,80 @@ class tkTable(ttk.Labelframe):
                 self._cells[i][j].destroy()
         del self._cells[:]
 
-def default_ico():
-    import tempfile, binascii
-    iconhexdata = \
-    '0000010001002020000001002000a8100000160000002800000020000000' \
-    '400000000100200000000000000000000000000000000000000000000000' \
-    '0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
-    '0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
-    '00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
-    '002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    '838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
-    'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
-    'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-    '1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
-    '002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
-    '3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-    '13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
-    'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
-    '13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
-    'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
-    '13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
-    'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
-    'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
-    'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
-    'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
-    '14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
-    '00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
-    'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
-    '07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
-    'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
-    'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
-    # create temp icon file, will be cleaned by tk.Tk destroy
-    iconfile = tempfile.NamedTemporaryFile(delete=False)
-    iconfile.write(binascii.a2b_hex(iconhexdata))
-    return iconfile.name
+# class ScrolledFrame(ttk.Frame):
+#     def __init__(self, root):
+#         ttk.Frame.__init__(self, root)
+#         self.canvas = tk.Canvas(root)
+#         self.frame = ttk.Frame(self.canvas)
+#         self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+#         self.canvas.configure(yscrollcommand=self.vsb.set)
+
+#         self.vsb.pack(side="right", fill="y")
+#         self.canvas.pack(side="left", fill="both", expand=True)
+#         self.canvas.create_window((4,4), window=self.frame, anchor="nw", tags="self.frame")
+
+#         self.frame.bind("<Configure>", self.onFrameConfigure)
+
+#         self.populate()
+
+#     def populate(self):
+#         '''Put in some fake data'''
+#         for row in range(100):
+#             ttk.Label(self.frame, text="%s" % row, width=3, borderwidth="1", relief="solid").grid(row=row, column=0)
+#             t="this is the second column for row %s" %row
+#             ttk.Label(self.frame, text=t).grid(row=row, column=1)
+
+#     def onFrameConfigure(self, event):
+#         '''Reset the scroll region to encompass the inner frame'''
+#         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 # main frame
 class AppTk(tk.Tk):
     "TK-Based Data driven GUI application"
-    _iconfile_name = default_ico()
+    _iconfile_name = None
     def __init__(self, usage=None):
-        tk.Tk.__init__(self)
+        root = tk.Tk.__init__(self)
         self.title(ClientScript._base)
         
+        self._iconfile_name = self.default_ico()
         self.iconbitmap(default=self._iconfile_name)
 
-        # self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        # create the script virtual frame with input controls related to that scripts
-        self.getLogo().grid(row=0, column=1, rowspan=3)
-        ttk.Button(self, text="Run ✔", command=self.runScript).grid(row=2, column=1, rowspan=3, pady=20, padx=20)
-        self.script = ScriptFrame(self, usage)
-        self.script.set(Settings().load())
 
-        # build the script interface, and restore settings for any previous run
-        #self.scrollY = tk.Scrollbar( self, orient=tk.VERTICAL)
-        #self.scrollY.grid(row=2, column=1, sticky='ns')
+        self.canvas = tk.Canvas(root)
+        self.frame = ttk.Frame(self.canvas)
+        self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vsb.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.create_window((0,0), window=self.frame, anchor="nw", tags="self.frame")
+
+        self.vsb.pack(side="left", fill="y")
+        self.frame.bind("<Configure>", self.onFrameConfigure)
+
+        ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
+        
+        # if we dont store the image in a variable, it will be garbage colected before being displayed
+        canvas = tk.Canvas(self)
+        # draw a Custom logo
+        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
+        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+        canvas['height'] = 100
+        canvas['width'] = 100
+        canvas.scale("all", 0, 0, 0.1, 0.1)
+        canvas.pack(side=tk.RIGHT, anchor="ne")
+        ttk.Button(self, text="Run ✔", command=self.runScript).pack(side="left")
+
+        self.script = ScriptFrame(self.frame, usage)
+        
         self.createMenu()
+
+    def onFrameConfigure(self, event):
+        '''Reset the scroll region to encompass the inner frame'''
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.canvas['width'] = self.frame.winfo_reqwidth()
+        #print(self.winfo_screenheight() * 0.8, self.frame.winfo_reqheight())
+        self.canvas['height'] = min(self.winfo_screenheight() * 0.8, self.frame.winfo_reqheight())
 
     def createMenu(self):
         # disable a legacy option to detach menus
@@ -781,18 +750,6 @@ class AppTk(tk.Tk):
         menu_file.add_command(label='Exit', command=self.destroy)
         menu_help.add_command(label='Help...', command=self.showHelp)
         menu_help.add_command(label='About...', command=self.showAbout)
-
-    # custom function to populate the widgets for this application
-    def getLogo(self):
-        # if we dont store the image in a variable, it will be garbage colected before being displayed
-        canvas = tk.Canvas(self)
-        # draw a Vale logo
-        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
-        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
-        canvas['height'] = 100
-        canvas['width'] = 100
-        canvas.scale("all", 0, 0, 0.1, 0.1)
-        return canvas
             
     def runScript(self):
         ClientScript.run(self.script)
@@ -824,6 +781,157 @@ class AppTk(tk.Tk):
         Settings().save(self.script.get(True))
         os.remove(self._iconfile_name)
         tk.Tk.destroy(self)
+
+    def default_ico(self):
+        import tempfile, binascii
+        iconhexdata = \
+        '0000010001002020000001002000a8100000160000002800000020000000' \
+        '400000000100200000000000000000000000000000000000000000000000' \
+        '0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
+        '0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
+        '00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
+        '002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        '838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
+        'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
+        '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
+        'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+        '1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
+        '002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
+        '3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+        '13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
+        'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
+        '13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
+        'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
+        '13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
+        'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
+        'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
+        '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
+        'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
+        'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
+        '00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
+        '14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
+        '00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+        'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+        'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
+        'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
+        '07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
+        'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
+        'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
+        # create temp icon file, will be cleaned by tk.Tk destroy
+        iconfile = tempfile.NamedTemporaryFile(delete=False)
+        iconfile.write(binascii.a2b_hex(iconhexdata))
+        return iconfile.name
 
 # default main for when this script is standalone
 # when this as a library, will redirect to the caller script main()
