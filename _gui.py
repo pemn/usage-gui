@@ -344,24 +344,19 @@ class UsageToken(str):
     def data(self):
         return self._data
 
-class ScriptFrame(list):
-    "virtual frame that holds the script argument controls"
-    _usage = None
-    _master = None
+class ScriptFrame(ttk.Frame):
+    "frame that holds the script argument controls"
+    _tokens = None
     def __init__(self, master, usage = None):
-        self._master = master
+        ttk.Frame.__init__(self, master)
         self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
-        for i in range(len(self._tokens)):
-            self.append(self.buildControl(self._tokens[i]))
+        for t in self._tokens:
+            self.buildControl(t).pack(anchor="w", padx=20, pady=10)
+            #self.append(self.buildControl(self._tokens[i]))
             #self[-1].grid(pady=10, padx=20, row=i, sticky="we")
             # self[-1].pack(expand=True, fill=tk.BOTH)
-            self[-1].pack(anchor="w", padx=20, pady=10)
+            #self[-1].pack(anchor="w", padx=20, pady=10)
             
-
-    @property
-    def master(self):
-        return self._master
-
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
         cmd = " ".join(ClientScript.exe() + [ClientScript.file()] + self.getArgs())
@@ -370,68 +365,52 @@ class ScriptFrame(list):
         self.master.clipboard_append(cmd)
         # workaround due to tkinter clearing clipboard on exit
         messagebox.showinfo(message='Command line copied to clipboard.\nWill be cleared after interface closes.')
+    
+    @property
+    def tokens(self):
+        return self._tokens
 
-    def children(self):
-        return self
-
+    # get panel parameters as a list of strings
     def get(self, labels=False):
         if labels:
-            return dict([[_.winfo_name(), _.get()] for _ in self])
-        return [_.get() for _ in self]
+            return dict([[k, v.get()] for k,v in self.children.items()])
+        return [self.children[t.name].get() for t in self.tokens]
     
+    # get panel parameters as a flat string
     def getArgs(self):
         args = []
-        for n in self:
-            arg = str(n.get())
+        for t in self.tokens:
+            arg = str(self.children[t.name].get())
             if len(arg) == 0 or '"' not in arg and (' ' in arg or ';' in arg):
                 arg = '"' + arg + '"'
             args.append(arg)
+
         return(args)
     
     def set(self, values):
         if isinstance(values, dict):
-            for n in self:
-                k = n.winfo_name()
+            for k,v in self.children.items():
                 if k in values:
-                    n.set(values[k])
+                    v.set(values[k])
         else:
-            for i in range(min(len(self), len(values))):
-                self[i].set(values[i])
+            for i in range(len(self.tokens)):
+                self.children[self.tokens[i].name].set(values[i])
 
     def buildControl(self, token):
         result = None
         if(token.type == '@'):
-            result = CheckBox(self.master, token.name, bool(token.data))
+            result = CheckBox(self, token.name, bool(token.data))
         elif(token.type == '*'):
-            result = FileEntry(self.master, token.name, token.data)
+            result = FileEntry(self, token.name, token.data)
         elif(token.type == '='):
-            result = LabelCombo(self.master, token.name, token.data)
+            result = LabelCombo(self, token.name, token.data)
         elif(token.type == ':'):
-            result = ComboPicker(self.master, token.name, token.data)
+            result = ComboPicker(self, token.name, token.data)
         elif(token.type == '#'):
-            result = tkTable(self.master, token.name, token.data.split('#'))
+            result = tkTable(self, token.name, token.data.split('#'))
         else:
-            result = LabelEntry(self.master, token.name)
+            result = LabelEntry(self, token.name)
         return result
-
-
-# should behave the same as Tix LabelEntry but with some customizations
-class BrandingFrame(ttk.Frame):
-    def __init__(self, master, about, run):
-        # create a container frame for the combo and label
-        ttk.Frame.__init__(self, master)
-        ttk.Label(self, text=about).pack(expand=True, fill=tk.BOTH, side=tk.BOTTOM)
-        
-        # if we dont store the image in a variable, it will be garbage colected before being displayed
-        canvas = tk.Canvas(self)
-        # draw a Vale logo
-        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
-        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
-        canvas['height'] = 100
-        canvas['width'] = 100
-        canvas.scale("all", 0, 0, 0.1, 0.1)
-        canvas.pack(side=tk.RIGHT)
-        ttk.Button(self, text="Run ✔", command=run).pack()
 
 # should behave the same as Tix LabelEntry but with some customizations
 class LabelEntry(ttk.Frame):
@@ -659,33 +638,6 @@ class tkTable(ttk.Labelframe):
                 self._cells[i][j].destroy()
         del self._cells[:]
 
-# class ScrolledFrame(ttk.Frame):
-#     def __init__(self, root):
-#         ttk.Frame.__init__(self, root)
-#         self.canvas = tk.Canvas(root)
-#         self.frame = ttk.Frame(self.canvas)
-#         self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
-#         self.canvas.configure(yscrollcommand=self.vsb.set)
-
-#         self.vsb.pack(side="right", fill="y")
-#         self.canvas.pack(side="left", fill="both", expand=True)
-#         self.canvas.create_window((4,4), window=self.frame, anchor="nw", tags="self.frame")
-
-#         self.frame.bind("<Configure>", self.onFrameConfigure)
-
-#         self.populate()
-
-#     def populate(self):
-#         '''Put in some fake data'''
-#         for row in range(100):
-#             ttk.Label(self.frame, text="%s" % row, width=3, borderwidth="1", relief="solid").grid(row=row, column=0)
-#             t="this is the second column for row %s" %row
-#             ttk.Label(self.frame, text=t).grid(row=row, column=1)
-
-#     def onFrameConfigure(self, event):
-#         '''Reset the scroll region to encompass the inner frame'''
-#         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
 # main frame
 class AppTk(tk.Tk):
     "TK-Based Data driven GUI application"
@@ -700,15 +652,17 @@ class AppTk(tk.Tk):
         self.columnconfigure(0, weight=1)
 
         self.canvas = tk.Canvas(root)
-        self.frame = ttk.Frame(self.canvas)
+
+        self.script = ScriptFrame(self.canvas, usage)
+        #self.frame = ttk.Frame(self.canvas)
         self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.vsb.set)
 
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.canvas.create_window((0,0), window=self.frame, anchor="nw", tags="self.frame")
+        self.canvas.create_window((0,0), window=self.script, anchor="nw")
 
         self.vsb.pack(side="left", fill="y")
-        self.frame.bind("<Configure>", self.onFrameConfigure)
+        self.script.bind("<Configure>", self.onFrameConfigure)
 
         ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
         
@@ -723,16 +677,16 @@ class AppTk(tk.Tk):
         canvas.pack(side=tk.RIGHT, anchor="ne")
         ttk.Button(self, text="Run ✔", command=self.runScript).pack(side="left")
 
-        self.script = ScriptFrame(self.frame, usage)
         
         self.createMenu()
+        self.script.set(Settings().load())
 
     def onFrameConfigure(self, event):
         '''Reset the scroll region to encompass the inner frame'''
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        self.canvas['width'] = self.frame.winfo_reqwidth()
+        self.canvas['width'] = self.script.winfo_reqwidth()
         #print(self.winfo_screenheight() * 0.8, self.frame.winfo_reqheight())
-        self.canvas['height'] = min(self.winfo_screenheight() * 0.8, self.frame.winfo_reqheight())
+        self.canvas['height'] = min(self.winfo_screenheight() * 0.8, self.script.winfo_reqheight())
 
     def createMenu(self):
         # disable a legacy option to detach menus
