@@ -24,6 +24,7 @@ https://github.com/pemn/usage-gui
 ### COMMON ###
 
 import sys, os, os.path
+import threading
 
 # this function handles most of the details required when using a exe interface
 def usage_gui(usage = None):
@@ -292,9 +293,11 @@ def dgd_list_layers(input_path):
             r.append(db.get_key())
     return r
 
-# detects file type and return a list of relevant options
-# searches are cached, so subsequent searcher for the same file path are instant
 class smartfilelist(object):
+    '''
+    detects file type and return a list of relevant options
+    searches are cached, so subsequent searcher for the same file path are instant
+    '''
     # global value cache, using path as key
     _cache = {}
     @staticmethod
@@ -353,8 +356,24 @@ class ScriptFrame(ttk.Frame):
         ttk.Frame.__init__(self, master)
 
         self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
-        for t in self._tokens:
-            self.buildControl(t).pack(anchor="w", padx=20, pady=10, fill="both")
+        # for each token, create a child control of the apropriated type
+        for token in self._tokens:
+            c = None
+            if token.type == '@':
+                c = CheckBox(self, token.name, bool(token.data))
+            elif token.type == '*':
+                c = FileEntry(self, token.name, token.data)
+            elif token.type == '=':
+                c = LabelCombo(self, token.name, token.data)
+            elif token.type == ':':
+                c = ComboPicker(self, token.name, token.data)
+            elif token.type == '#':
+                c = tkTable(self, token.name, token.data.split('#'))
+            elif token.name:
+                c = LabelEntry(self, token.name)
+            else:
+                continue
+            c.pack(anchor="w", padx=20, pady=10, fill="both")
             
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
@@ -395,22 +414,6 @@ class ScriptFrame(ttk.Frame):
             for i in range(len(self.tokens)):
                 self.children[self.tokens[i].name].set(values[i])
 
-    def buildControl(self, token):
-        result = None
-        if(token.type == '@'):
-            result = CheckBox(self, token.name, bool(token.data))
-        elif(token.type == '*'):
-            result = FileEntry(self, token.name, token.data)
-        elif(token.type == '='):
-            result = LabelCombo(self, token.name, token.data)
-        elif(token.type == ':'):
-            result = ComboPicker(self, token.name, token.data)
-        elif(token.type == '#'):
-            result = tkTable(self, token.name, token.data.split('#'))
-        else:
-            result = LabelEntry(self, token.name)
-        return result
-
 # should behave the same as Tix LabelEntry but with some customizations
 class LabelEntry(ttk.Frame):
     def __init__(self, master, label):
@@ -437,7 +440,7 @@ class LabelEntry(ttk.Frame):
     
 
 class CheckBox(ttk.Checkbutton):
-    "superset of checkbutton with a builtin variable"
+    '''superset of checkbutton with a builtin variable'''
     def __init__(self, master, label, start=False):
         self._variable = tk.BooleanVar(value=start)
         ttk.Checkbutton.__init__(self, master, name=label, text=label, variable=self._variable)
@@ -653,7 +656,7 @@ class AppTk(tk.Tk):
 
         self.columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(root, width=self.winfo_screenwidth() * 0.25)
+        self.canvas = tk.Canvas(root, width=self.winfo_screenwidth() * 0.4)
         self.script = ScriptFrame(self.canvas, usage)
         self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.vsb.set)
@@ -669,14 +672,18 @@ class AppTk(tk.Tk):
         
         # if we dont store the image in a variable, it will be garbage colected before being displayed
         self.drawLogo().pack(side=tk.RIGHT, anchor="ne")
-        ttk.Button(self, text="Run ✔", command=self.runScript).pack(side="left")
+        self.button = ttk.Button(self, text="Run ✅", command=self.runScript)
+        self.button.pack(side="left")
         
+        #self.progress = ttk.Progressbar(self, mode="indeterminate", value=0)
+        self.progress = ttk.Progressbar(self, mode="determinate")
+        self.progress.pack(side="bottom", expand=True, fill="x")
+
         self.createMenu()
         self.script.set(Settings().load())
 
-
     def onCanvasConfigure(self, event):
-        self.canvas.itemconfig(self.canvas_frame, width = event.width)
+        self.canvas.itemconfig(self.canvas_frame, width = event.width - 4)
 
     def onFrameConfigure(self, event):
         '''Reset the scroll region to encompass the inner frame'''
@@ -684,10 +691,10 @@ class AppTk(tk.Tk):
         self.canvas['height'] = min(self.winfo_screenheight() * 0.8, self.script.winfo_reqheight())
 
     def createMenu(self):
+        '''create a hardcoded menu for our app'''
         # disable a legacy option to detach menus
         self.option_add('*tearOff', False)
         menubar = tk.Menu(self)
-        self['menu'] = menubar
         menu_file = tk.Menu(menubar)
         menu_edit = tk.Menu(menubar)
         menu_help = tk.Menu(menubar)
@@ -699,10 +706,25 @@ class AppTk(tk.Tk):
         menu_file.add_command(label='Exit', command=self.destroy)
         menu_help.add_command(label='Help...', command=self.showHelp)
         menu_help.add_command(label='About...', command=self.showAbout)
+        self['menu'] = menubar
             
     def runScript(self):
-        ClientScript.run(self.script)
-        messagebox.showinfo(message='Finished',title=ClientScript.file())
+        # run the process in another thread as not to block the GUI message loop
+        def fork():
+            self.progress["value"] = 0
+            self.progress["mode"] = "indeterminate"
+            self.progress.start()
+            self.button["text"] = "Run ✅"
+            self.button["state"] = "disabled"
+            ClientScript.run(self.script)
+            self.button["text"] = "Run ✔"
+            self.button["state"] = "enabled"
+            self.progress.stop()
+            self.progress["mode"] = "determinate"
+            self.progress["value"] = 100
+            #messagebox.showinfo(message='Finished',title=ClientScript.file())
+
+        threading.Thread(None, fork).start()
 
     def showHelp(self):
         script_pdf = ClientScript.file('pdf')
@@ -732,8 +754,8 @@ class AppTk(tk.Tk):
         tk.Tk.destroy(self)
 
     def drawLogo(self):
+        '''draw a custom logo that will fit the ne corner of our app'''
         canvas = tk.Canvas(self)
-        # draw a Custom logo
         canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
         canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
         canvas['height'] = 100
