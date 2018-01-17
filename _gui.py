@@ -158,7 +158,7 @@ class ClientScript(list):
             main(*script.get())
         else:
             # create a new process and passes the arguments on the command line
-            process = subprocess.Popen(cls.exe() + [cls._file] + script.getArgs())
+            subprocess.Popen(cls.exe() + [cls._file] + script.getArgs()).wait()
 
     @classmethod
     def type(cls):
@@ -377,7 +377,7 @@ class ScriptFrame(ttk.Frame):
             
     def copy(self):
         "Assemble the current parameters and copy the full command line to the clipboard"
-        cmd = " ".join(ClientScript.exe() + [ClientScript.file()] + self.getArgs())
+        cmd = " ".join(ClientScript.exe() + [ClientScript.file()] + self.getArgs(True))
         print(cmd)
         self.master.clipboard_clear()
         self.master.clipboard_append(cmd)
@@ -395,11 +395,11 @@ class ScriptFrame(ttk.Frame):
         return [self.children[t.name].get() for t in self.tokens]
     
     # get panel parameters as a flat string
-    def getArgs(self):
+    def getArgs(self, quote_blank = False):
         args = []
         for t in self.tokens:
             arg = str(self.children[t.name].get())
-            if len(arg) == 0 or '"' not in arg and (' ' in arg or ';' in arg):
+            if (quote_blank and len(arg) == 0) or '"' not in arg and (' ' in arg or ';' in arg):
                 arg = '"' + arg + '"'
             args.append(arg)
 
@@ -716,13 +716,18 @@ class AppTk(tk.Tk):
             self.progress.start()
             self.button["text"] = "Run ✅"
             self.button["state"] = "disabled"
-            ClientScript.run(self.script)
-            self.button["text"] = "Run ✔"
-            self.button["state"] = "enabled"
-            self.progress.stop()
-            self.progress["mode"] = "determinate"
-            self.progress["value"] = 100
-            #messagebox.showinfo(message='Finished',title=ClientScript.file())
+            try:
+                ClientScript.run(self.script)
+                self.button["text"] = "Run ✔"
+                self.progress.stop()
+                self.progress["value"] = 100
+            except Exception as e:
+                self.button["text"] = "Run ☠"
+                self.progress.stop()
+                messagebox.showerror(message=e,title=sys.argv[0])
+            finally:
+                self.button["state"] = "enabled"
+                self.progress["mode"] = "determinate"
 
         threading.Thread(None, fork).start()
 
