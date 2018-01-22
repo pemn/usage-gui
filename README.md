@@ -13,13 +13,12 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
  - Dynamic lists for the comboboxes. Options can be defined inline or by reading fields from csv and xlsx files.
  - Data persistence and save/load of panel settings using .ini files.
  - Copy the full script command line to clipboard, so you can run it on enviroments without a display (Ex.: telnet/ssh).
- - Can be packaged into a standalone exe.
+ - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
+ - Can be packaged into a standalone exe or called using a .cmd file from windows explorer.
  - Uses the ubiquitous and mature Tkinter (tcl/tk) for the backend rendering
  - All modules used are bundled by default on the most popular python distributions.
- - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
  - Can easily be embedded with business logic to create a single file standalone solution, even without packaging (single .py file)
- - Open Source as detailed in the license
- - Flexible. Can be used with any script whose source files are ASCII files.
+ - Many quality of life smaller features like adaptive control sizes, script header display, copy command line.
  - Supported file types out of the box (more can be easily added just by editing the hardcoded list):
    - Python (.py but using the business logic main function)
    - Perl (.pl, .lava)
