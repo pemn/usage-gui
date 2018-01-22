@@ -57,8 +57,8 @@ the resulting list is semicollon separated (`;`)
 multiple controls can be used in a single line, and columns in each row will be comma (`,`) separated  
 Ex.: a,1;b,2;c,3  
 
-### Example of the "usage:" line which should create a panel like the screenshot above
-`usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label logical1@1 logical2@ static_choice=red,green,blue table1#variable:input_csv table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg`
+### Example of the "usage:" line which creates a panel like the screenshot above
+`usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label plain_logical@ table1#variable:input_csv enabler_logical@5 conditional_logical@ conditional_choice1=red,green,blue conditional_entry1 table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg out_of_reach`
 
 
 ## License
