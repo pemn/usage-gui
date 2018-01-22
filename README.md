@@ -49,8 +49,9 @@ file browse control, listing only files that match one of the given extensions
 derived control that gets its list values from the file pointed by another file browse control  
 different files will have different associated lists, generated on the fly  
 Ex.: csv files will be a list of column names  
-- `<name>@<default value>`  
-checkbox boolean control
+- `<name>@<enable/disable reach>`  
+checkbox boolean control  
+can be used to enable/disable groups of controls by setting the reach option to a number of following controls that will be affected
 - `<name>#<control>(#<control>...)`  
 grid of controls, allowing a the user to create a list of similar values  
 the resulting list is semicollon separated (`;`)  
