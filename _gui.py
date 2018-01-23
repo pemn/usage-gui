@@ -365,7 +365,7 @@ class ScriptFrame(ttk.Frame):
         c = LabelEntry(self, token.name)
       else:
         continue
-      c.pack(anchor="w", padx=20, pady=10, fill="both")
+      c.pack(anchor="w", padx=20, pady=10, fill=tk.BOTH)
       
   def copy(self):
     "Assemble the current parameters and copy the full command line to the clipboard"
@@ -704,23 +704,22 @@ class AppTk(tk.Tk):
     self.vsb = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
     self.canvas.configure(yscrollcommand=self.vsb.set)
 
-    self.canvas.pack(side="left", fill="both", expand=True)
+    self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     self.canvas_frame = self.canvas.create_window((0,0), window=self.script, anchor="nw")
 
-    self.vsb.pack(side="left", fill="y")
+    self.vsb.pack(side=tk.LEFT, fill=tk.Y)
     self.script.bind("<Configure>", self.onFrameConfigure)
     self.canvas.bind('<Configure>', self.onCanvasConfigure)
 
     ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
     
     # if we dont store the image in a variable, it will be garbage colected before being displayed
-    self.drawLogo().pack(side=tk.RIGHT, anchor="ne")
+    self.drawLogo().pack(side=tk.TOP, anchor="ne")
     self.button = ttk.Button(self, text="Run ✅", command=self.runScript)
-    self.button.pack(side="left")
+    self.button.pack(side=tk.LEFT)
     
-    #self.progress = ttk.Progressbar(self, mode="indeterminate", value=0)
     self.progress = ttk.Progressbar(self, mode="determinate")
-    self.progress.pack(side="bottom", expand=True, fill="x")
+    self.progress.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=10)
 
     self.createMenu()
     self.script.set(Settings().load())
@@ -754,23 +753,21 @@ class AppTk(tk.Tk):
   def runScript(self):
     # run the process in another thread as not to block the GUI message loop
     def fork():
-      self.progress["value"] = 0
-      self.progress["mode"] = "indeterminate"
+      self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
-      self.button["text"] = "Run ⮔"
-      self.button["state"] = "disabled"
+      self.button.configure(state = "disabled", text = "Run ⮔")
       try:
         ClientScript.run(self.script)
-        self.button["text"] = "Run ✔"
+        self.button.configure(text = "Run ✔")
         self.progress.stop()
-        self.progress["value"] = 100
+        self.progress.configure(value = 100)
       except Exception as e:
-        self.button["text"] = "Run ☠"
+        self.button.configure(text = "Run ☠")
         self.progress.stop()
         messagebox.showerror(message=e,title=sys.argv[0])
       finally:
-        self.button["state"] = "enabled"
-        self.progress["mode"] = "determinate"
+        self.button.configure(state = "enabled")
+        self.progress.configure(mode = "determinate")
 
     threading.Thread(None, fork).start()
 
