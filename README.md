@@ -6,7 +6,7 @@ Another rationale for this project is that we use Tk for backend, while guidata 
 Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Screenshot
-![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1.png)
+![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1os.png)
 
 ## Features
  - A graphical user interface generated from a simple one line template
