@@ -694,7 +694,7 @@ class AppTk(tk.Tk):
     root = tk.Tk.__init__(self)
     self.title(ClientScript._base)
     
-    self._iconfile_name = self.default_ico()
+    self._iconfile_name = createIcon(os.environ['USERDOMAIN'])
     self.iconbitmap(default=self._iconfile_name)
 
     self.columnconfigure(0, weight=1)
@@ -714,7 +714,7 @@ class AppTk(tk.Tk):
     ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
     
     # if we dont store the image in a variable, it will be garbage colected before being displayed
-    self.drawLogo().pack(side=tk.TOP, anchor="ne")
+    drawLogo(tk.Canvas(self), os.environ['USERDOMAIN']).pack(side=tk.TOP, anchor="ne")
     self.button = ttk.Button(self, text="Run ✅", command=self.runScript)
     self.button.pack(side=tk.LEFT)
     
@@ -798,165 +798,216 @@ class AppTk(tk.Tk):
     os.remove(self._iconfile_name)
     tk.Tk.destroy(self)
 
-  def drawLogo(self):
+iconhexdata = dict()
+
+iconhexdata['VALENET'] = \
+'0000010001002020000001002000a8100000160000002800000020000000' \
+'400000000100200000000000000000000000000000000000000000000000' \
+'0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
+'0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
+'00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
+'002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
+'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
+'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
+'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+'1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
+'002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
+'3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
+'13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
+'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
+'13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
+'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
+'13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
+'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
+'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
+'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
+'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
+'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
+'00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
+'14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
+'00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
+'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
+'07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
+'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
+'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
+
+iconhexdata['default'] = \
+'000001000100101000000100200068040000160000002800000010000000' \
+'20000000010020000000000000040000120b0000120b0000000000000000' \
+'0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffffff00ffffff0001010100000000000000004c000000ba' \
+'000000750000000000000000000000000000000000000075000000ba0000' \
+'004c0000000001010100ffffff00ffffff00010101000000004b0f1a0dc8' \
+'64b754fd0f1b0dc5000000230000000000000000000000230f1d0dc563c4' \
+'52fd0e1c0cc80000004b01010100ffffff00ffffff00010101190a1009b6' \
+'58994af35eb04dff3f7035e60000007a00000000000000000000007a3e77' \
+'34e665c754ff56a948f3091008b601010119ffffff00ffffff0001010163' \
+'3b5d33da5ca64bff5aa649ff5ba64afc000000b600000000000000000000' \
+'00b65eb54efc62bf51ff64c253ff34602cda01010163ffffff00ffffff00' \
+'01010194659d57f0579d46ff579f46ff427a36ee0101017e010101000101' \
+'01000101017e47863aee5fb54eff60b94fff58a04af001010194ffffff00' \
+'ffffff00020202a979ba69fc60a44fff579b46ff0b1309bd010101180101' \
+'010001010100010101180c150abd5bab4aff5daf4cff68b657fc020202a9' \
+'ffffff00ffffff00020202a37fc16efc66aa55ff64a853ff0d150bb90101' \
+'01180101010001010100010101180c140ab958a247ff59a548ff6cb45bfc' \
+'020202a3ffffff00ffffff000303038579b26bec6aae59ff69ad58ff3456' \
+'2cd2010101760101011701010117010101762b4d23d2569c45ff5aa149ff' \
+'6aa45bec03030385ffffff00ffffff00030303544d6f45c980c46fff70b4' \
+'5fff6cad5cfb395b31d10f170db40f170db4395b31d16cad5cfb70b45fff' \
+'7cc06bff496a40c903030354ffffff00ffffff000303031410160f9281bc' \
+'72eb82c671ff79bd68ff79bd68ff79bd68ff79bd68ff79bd68ff79bd68ff' \
+'80c46fff7eb86feb10160e9203030314ffffff00ffffff00030303000404' \
+'04381b25189c84bf75eb8fd37eff86ca75ff82c671ff82c671ff86ca75ff' \
+'8ed27dff82bd73eb1b25189c0404043803030300ffffff00ffffff000303' \
+'030004040400040404361218108a507248c084be75e794d784fa94d784fa' \
+'83bd74e7507247c01218108a040404360404040003030300ffffff00ffff' \
+'ff00030303000404040004040400040404120404044a0404047104040485' \
+'04040485040404710404044a04040412040404000404040003030300ffff' \
+'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
+'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
+'ff00ffffff00ffff0000ffff0000e3c70000c18300008181000081810000' \
+'818100008181000081810000800100008001000080010000c0030000e007' \
+'0000f00f0000ffff0000'
+
+def drawLogo(canvas, choice = None):
     '''draw a custom logo that will fit the ne corner of our app'''
-    canvas = tk.Canvas(self)
-    canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
-    canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+    if choice == 'VALENET':
+        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
+        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+    else:
+        canvas.create_arc(50, 50, 950, 950, outline='', fill="#3fa648", start=290, extent=320)
+        canvas.create_oval(360, 360, 640, 640, outline='', fill=canvas["background"])
     canvas['height'] = 100
     canvas['width'] = 100
     canvas.scale("all", 0, 0, 0.1, 0.1)
     return canvas
 
-  def default_ico(self):
+
+def createIcon(choice = None):
     import tempfile, binascii
-    iconhexdata = \
-    '0000010001002020000001002000a8100000160000002800000020000000' \
-    '400000000100200000000000000000000000000000000000000000000000' \
-    '0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
-    '0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
-    '00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
-    '002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    '838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
-    'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
-    '00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
-    'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-    '1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
-    '002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
-    '3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-    '13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
-    'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
-    '13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
-    'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
-    '13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
-    'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
-    'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
-    '838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
-    'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
-    'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
-    '00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
-    '14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
-    '00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-    'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-    'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
-    'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
-    '07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
-    'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
-    'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
     # create temp icon file, will be cleaned by tk.Tk destroy
     iconfile = tempfile.NamedTemporaryFile(delete=False)
-    iconfile.write(binascii.a2b_hex(iconhexdata))
+    if choice not in iconhexdata:
+        choice = 'default'
+
+    iconfile.write(binascii.a2b_hex(iconhexdata[choice]))
     return iconfile.name
 
 # default main for when this script is standalone
