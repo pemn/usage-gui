@@ -18,13 +18,9 @@ You can contribute to the main repository at
 
 https://github.com/pemn/usage-gui
 '''
-# _gui.py
-# auxiliary functions for data input/output and data driven gui
 
-### COMMON ###
-
+### UTIL { ###
 import sys, os, os.path
-import threading
 
 # this function handles most of the details required when using a exe interface
 def usage_gui(usage = None):
@@ -109,10 +105,9 @@ def table_field(args, table=False):
       args = args[args.find(':')+1:]
   return(args)
 
+### } UTIL ###
 
-## GUI ###
-# data driven GUI interface
-
+## GUI { ###
 import re
 import tkinter as tk
 import tkinter.ttk as ttk
@@ -120,6 +115,7 @@ import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
 import pickle
 import subprocess
+import threading
 
 class ClientScript(list):
   '''Handles the script with the same name as this interface file'''
@@ -798,6 +794,10 @@ class AppTk(tk.Tk):
     os.remove(self._iconfile_name)
     tk.Tk.destroy(self)
 
+### } GUI ###
+
+### BRANDING { ###
+
 iconhexdata = dict()
 
 iconhexdata['VALENET'] = \
@@ -1009,6 +1009,8 @@ def createIcon(choice = None):
 
     iconfile.write(binascii.a2b_hex(iconhexdata[choice]))
     return iconfile.name
+
+### } BRANDING ###
 
 # default main for when this script is standalone
 # when this as a library, will redirect to the caller script main()
