@@ -20,7 +20,7 @@ https://github.com/pemn/usage-gui
 '''
 
 ### UTIL { ###
-import sys, os, os.path
+import sys, os, os.path, time
 
 # this function handles most of the details required when using a exe interface
 def usage_gui(usage = None):
@@ -149,12 +149,14 @@ class ClientScript(list):
 
   @classmethod
   def run(cls, script):
+    print("# %s %s started" % (time.strftime('%H:%M:%S'), cls._file))
     if cls._type is None:
       # call the main on the caller script with the arguments as a python dict
       main(*script.get())
     else:
       # create a new process and passes the arguments on the command line
       subprocess.Popen(cls.exe() + [cls._file] + script.getArgs()).wait()
+    print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls._file))
 
   @classmethod
   def type(cls):
@@ -647,7 +649,7 @@ class tkTable(ttk.Labelframe):
     for col in range(len(self._columns)+1):
       child = None
       if col == 0:
-        child = ttk.Button(self, text="⛌", width=2, command=lambda: self.delRow(row))
+        child = ttk.Button(self, text="✖", width=2, command=lambda: self.delRow(row))
       else:
         token = self._columns[col-1]
         if(token.type == '@'):
