@@ -136,7 +136,7 @@ class ClientScript(list):
   @classmethod
   def exe(cls):
     if cls._type == "csh":
-      return ["csh"]
+      return ["csh","-f"]
     if cls._type == "bat":
       return ["cmd", "/c"]
     if cls._type == "vbs" or cls._type == "js":
@@ -604,7 +604,7 @@ class tkTable(ttk.Labelframe):
       self._label = str(self.winfo_id())
     self._columns = [UsageToken(_) for _ in columns]
     self._cells = []
-    ttk.Button(self, text="⛨", width=2, command=self.addRow).grid(row=99, column=0)
+    ttk.Button(self, text="➕", width=3, command=self.addRow).grid(row=99, column=0)
     for i in range(len(self._columns)):
       self.columnconfigure(i+1, weight=1)
       ttk.Label(self, text=self._columns[i].name).grid(row=0, column=i+1)
@@ -649,7 +649,7 @@ class tkTable(ttk.Labelframe):
     for col in range(len(self._columns)+1):
       child = None
       if col == 0:
-        child = ttk.Button(self, text="✖", width=2, command=lambda: self.delRow(row))
+        child = ttk.Button(self, text="✖", width=3, command=lambda: self.delRow(row))
       else:
         token = self._columns[col-1]
         if(token.type == '@'):
@@ -713,7 +713,7 @@ class AppTk(tk.Tk):
     
     # if we dont store the image in a variable, it will be garbage colected before being displayed
     drawLogo(tk.Canvas(self), os.environ['USERDOMAIN']).pack(side=tk.TOP, anchor="ne")
-    self.button = ttk.Button(self, text="Run ✅", command=self.runScript)
+    self.button = ttk.Button(self, text="Run", command=self.runScript)
     self.button.pack(side=tk.LEFT)
     
     self.progress = ttk.Progressbar(self, mode="determinate")
@@ -753,14 +753,12 @@ class AppTk(tk.Tk):
     def fork():
       self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
-      self.button.configure(state = "disabled", text = "Run ⮔")
+      self.button.configure(state = "disabled")
       try:
         ClientScript.run(self.script)
-        self.button.configure(text = "Run ✔")
         self.progress.stop()
         self.progress.configure(value = 100)
       except Exception as e:
-        self.button.configure(text = "Run ☠")
         self.progress.stop()
         messagebox.showerror(message=e,title=sys.argv[0])
       finally:
