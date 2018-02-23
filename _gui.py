@@ -14,9 +14,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-You can contribute to the main repository at
+*** You can contribute to the main repository at: ***
 
 https://github.com/pemn/usage-gui
+---------------------------------
+
 '''
 
 ### UTIL { ###
@@ -41,7 +43,7 @@ def usage_gui(usage = None):
 # isis: vulcan database
 # csv: ascii table
 # xls: excel table
-def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
+def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
   import pandas as pd
   df = pd.DataFrame()
   if input_path.lower().endswith('csv'):
@@ -53,14 +55,14 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
     bm = vulcan.block_model(input_path)
 
     # get a DataFrame with block model data
-    df = bm.get_pandas(vl, bm_sanitize_condition(condition))
+    df = bm.get_pandas(filter(bm.is_field, vl), bm_sanitize_condition(condition))
   elif input_path.lower().endswith('isis'):
     import vulcan
     db = vulcan.isisdb(input_path)
     # by default, use last table which is the desired one in most cases
     if table_name is None or table_name not in db.table_list():
       table_name = db.table_list()[-1]
-    # create special field "KEY"
+
     field_list = list(db.field_list(table_name))
     fdata = []
     # db.keys is bugged as of vulcan 10.1.3
@@ -74,7 +76,8 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
       df.query(condition, True)
 
   # replace -99 with NaN, meaning they will not be included in the stats
-  df.mask(df == -99, inplace=True)
+  if not keep_null:
+    df.mask(df == -99, inplace=True)
 
   return(df)
 
@@ -149,14 +152,15 @@ class ClientScript(list):
 
   @classmethod
   def run(cls, script):
-    print("# %s %s started" % (time.strftime('%H:%M:%S'), cls._file))
+    print("# %s %s started" % (time.strftime('%H:%M:%S'), cls.file()))
     if cls._type is None:
       # call the main on the caller script with the arguments as a python dict
       main(*script.get())
     else:
       # create a new process and passes the arguments on the command line
       subprocess.Popen(cls.exe() + [cls._file] + script.getArgs()).wait()
-    print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls._file))
+
+    print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
 
   @classmethod
   def type(cls):
@@ -170,7 +174,7 @@ class ClientScript(list):
   def file(cls, ext = None):
     if ext is not None:
       return cls._base + '.' + ext
-    return cls._file
+    return os.path.basename(cls._file)
   
   @classmethod
   def args(cls, usage = None):
@@ -278,7 +282,7 @@ def dgd_list_layers(input_path):
   r = []
   # return the list of layers stored in a dgd
   db = vulcan.isisdb(input_path)
-  for key in db.keys:
+  for record in db.keys:
     if db.get_key().find('$') == -1:
       r.append(db.get_key())
   return r
@@ -300,7 +304,7 @@ class smartfilelist(object):
       if(input_path.lower().endswith(".dgd.isis")):
         # list layers of dgd files
         smartfilelist._cache[input_path] = dgd_list_layers(input_path)
-      if(input_path.lower().endswith(".bmf")):
+      elif(input_path.lower().endswith(".bmf")):
         import vulcan
         bm = vulcan.block_model(input_path)
         smartfilelist._cache[input_path] = bm.field_list()
@@ -311,7 +315,7 @@ class smartfilelist(object):
 
     else: # default to a empty list
       smartfilelist._cache[input_path] = []
-  
+
     return(smartfilelist._cache[input_path])
 
 class UsageToken(str):
@@ -389,7 +393,7 @@ class ScriptFrame(ttk.Frame):
     args = []
     for t in self.tokens:
       arg = str(self.children[t.name].get())
-      if (quote_blank and len(arg) == 0) or '"' not in arg and (' ' in arg or ';' in arg):
+      if (quote_blank and (len(arg) == 0 or ('"' not in arg and (' ' in arg or ';' in arg or "\\" in arg)))):
         arg = '"' + arg + '"'
       args.append(arg)
 
