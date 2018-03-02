@@ -4,14 +4,20 @@
 :: calls python bundled with Vulcan on a file of the same name as this script
 @echo off
 setlocal
+if defined VULCAN_EXE goto :VULCAN_OK
+
 set typelib=HKLM\SOFTWARE\Classes\TypeLib\{322858FC-9F41-416D-85DC-610C70A51111}\3.0\HELPDIR
-for /f "tokens=2 delims=:" %%i in ('reg.exe query %typelib%') do set VULCAN_EXE=%SYSTEMDRIVE%%%i
+
+for /f "tokens=2 delims=:" %%i in ('reg.exe query %typelib%') do set VULCAN_EXE=%%~si
 
 :: setup vulcan enviroment
 set VULCAN_BIN=%VULCAN_EXE:~0,-4%
 set VULCAN=%VULCAN_EXE:~0,-8%
-set PATH=%VULCAN_EXE%;%VULCAN_BIN%oda;%VULCAN_BIN%cygnus\bin;%PATH%
+set PATH=%VULCAN_EXE%;%VULCAN_BIN%;%VULCAN_BIN%cygnus\bin;%VULCAN_BIN%other\x86;%PATH%
 set PERLLIB=%VULCAN%lib\perl;%VULCAN%lib\perl\site\lib
+set VULCAN_VERSION_MAJOR=10
+
+:VULCAN_OK
 
 "%VULCAN_EXE%python.exe" -x %0
 goto :EOF
@@ -32,13 +38,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-You can contribute to the main repository at
+*** You can contribute to the main repository at: ***
 
 https://github.com/pemn/usage-gui
+---------------------------------
+
 '''
 
 ### UTIL { ###
-import sys, os, os.path
+import sys, os, os.path, time
 
 # this function handles most of the details required when using a exe interface
 def usage_gui(usage = None):
@@ -59,7 +67,7 @@ def usage_gui(usage = None):
 # isis: vulcan database
 # csv: ascii table
 # xls: excel table
-def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
+def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
   import pandas as pd
   df = pd.DataFrame()
   if input_path.lower().endswith('csv'):
@@ -71,14 +79,14 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
     bm = vulcan.block_model(input_path)
 
     # get a DataFrame with block model data
-    df = bm.get_pandas(vl, bm_sanitize_condition(condition))
+    df = bm.get_pandas(filter(bm.is_field, vl), bm_sanitize_condition(condition))
   elif input_path.lower().endswith('isis'):
     import vulcan
     db = vulcan.isisdb(input_path)
     # by default, use last table which is the desired one in most cases
     if table_name is None or table_name not in db.table_list():
       table_name = db.table_list()[-1]
-    # create special field "KEY"
+
     field_list = list(db.field_list(table_name))
     fdata = []
     # db.keys is bugged as of vulcan 10.1.3
@@ -92,7 +100,8 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None):
       df.query(condition, True)
 
   # replace -99 with NaN, meaning they will not be included in the stats
-  df.mask(df == -99, inplace=True)
+  if not keep_null:
+    df.mask(df == -99, inplace=True)
 
   return(df)
 
@@ -154,7 +163,7 @@ class ClientScript(list):
   @classmethod
   def exe(cls):
     if cls._type == "csh":
-      return ["csh"]
+      return ["csh","-f"]
     if cls._type == "bat":
       return ["cmd", "/c"]
     if cls._type == "vbs" or cls._type == "js":
@@ -167,12 +176,15 @@ class ClientScript(list):
 
   @classmethod
   def run(cls, script):
+    print("# %s %s started" % (time.strftime('%H:%M:%S'), cls.file()))
     if cls._type is None:
       # call the main on the caller script with the arguments as a python dict
       main(*script.get())
     else:
       # create a new process and passes the arguments on the command line
       subprocess.Popen(cls.exe() + [cls._file] + script.getArgs()).wait()
+
+    print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
 
   @classmethod
   def type(cls):
@@ -186,7 +198,7 @@ class ClientScript(list):
   def file(cls, ext = None):
     if ext is not None:
       return cls._base + '.' + ext
-    return cls._file
+    return os.path.basename(cls._file)
   
   @classmethod
   def args(cls, usage = None):
@@ -294,7 +306,7 @@ def dgd_list_layers(input_path):
   r = []
   # return the list of layers stored in a dgd
   db = vulcan.isisdb(input_path)
-  for key in db.keys:
+  for record in db.keys:
     if db.get_key().find('$') == -1:
       r.append(db.get_key())
   return r
@@ -316,7 +328,7 @@ class smartfilelist(object):
       if(input_path.lower().endswith(".dgd.isis")):
         # list layers of dgd files
         smartfilelist._cache[input_path] = dgd_list_layers(input_path)
-      if(input_path.lower().endswith(".bmf")):
+      elif(input_path.lower().endswith(".bmf")):
         import vulcan
         bm = vulcan.block_model(input_path)
         smartfilelist._cache[input_path] = bm.field_list()
@@ -327,7 +339,7 @@ class smartfilelist(object):
 
     else: # default to a empty list
       smartfilelist._cache[input_path] = []
-  
+
     return(smartfilelist._cache[input_path])
 
 class UsageToken(str):
@@ -405,7 +417,7 @@ class ScriptFrame(ttk.Frame):
     args = []
     for t in self.tokens:
       arg = str(self.children[t.name].get())
-      if (quote_blank and len(arg) == 0) or '"' not in arg and (' ' in arg or ';' in arg):
+      if (quote_blank and (len(arg) == 0 or ('"' not in arg and (' ' in arg or ';' in arg or "\\" in arg)))):
         arg = '"' + arg + '"'
       args.append(arg)
 
@@ -620,7 +632,7 @@ class tkTable(ttk.Labelframe):
       self._label = str(self.winfo_id())
     self._columns = [UsageToken(_) for _ in columns]
     self._cells = []
-    ttk.Button(self, text="⛨", width=2, command=self.addRow).grid(row=99, column=0)
+    ttk.Button(self, text="➕", width=3, command=self.addRow).grid(row=99, column=0)
     for i in range(len(self._columns)):
       self.columnconfigure(i+1, weight=1)
       ttk.Label(self, text=self._columns[i].name).grid(row=0, column=i+1)
@@ -665,7 +677,7 @@ class tkTable(ttk.Labelframe):
     for col in range(len(self._columns)+1):
       child = None
       if col == 0:
-        child = ttk.Button(self, text="⛌", width=2, command=lambda: self.delRow(row))
+        child = ttk.Button(self, text="✖", width=3, command=lambda: self.delRow(row))
       else:
         token = self._columns[col-1]
         if(token.type == '@'):
@@ -729,7 +741,7 @@ class AppTk(tk.Tk):
     
     # if we dont store the image in a variable, it will be garbage colected before being displayed
     drawLogo(tk.Canvas(self), os.environ['USERDOMAIN']).pack(side=tk.TOP, anchor="ne")
-    self.button = ttk.Button(self, text="Run ✅", command=self.runScript)
+    self.button = ttk.Button(self, text="Run", command=self.runScript)
     self.button.pack(side=tk.LEFT)
     
     self.progress = ttk.Progressbar(self, mode="determinate")
@@ -769,14 +781,12 @@ class AppTk(tk.Tk):
     def fork():
       self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
-      self.button.configure(state = "disabled", text = "Run ⮔")
+      self.button.configure(state = "disabled")
       try:
         ClientScript.run(self.script)
-        self.button.configure(text = "Run ✔")
         self.progress.stop()
         self.progress.configure(value = 100)
       except Exception as e:
-        self.button.configure(text = "Run ☠")
         self.progress.stop()
         messagebox.showerror(message=e,title=sys.argv[0])
       finally:
@@ -1042,5 +1052,3 @@ def main(*args):
   print(__name__)
   print(args)
   messagebox.showinfo(message='Business Logic placeholder')
-
-usage_gui(None)
