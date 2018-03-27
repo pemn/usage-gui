@@ -55,7 +55,9 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
     bm = vulcan.block_model(input_path)
 
     # get a DataFrame with block model data
-    df = bm.get_pandas(filter(bm.is_field, vl), bm_sanitize_condition(condition))
+    if vl is not None:
+      vl = filter(bm.is_field, vl)
+    df = bm.get_pandas(vl, bm_sanitize_condition(condition))
   elif input_path.lower().endswith('isis'):
     import vulcan
     db = vulcan.isisdb(input_path)
@@ -65,13 +67,13 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
 
     field_list = list(db.field_list(table_name))
     fdata = []
-    # db.keys is bugged as of vulcan 10.1.3
-    # we can only call it once. subsequent calls will only find the last key.
-    # db.rewind() does not help, and should not be necessary anyway
-    for ikey in db.keys:
-      for record in db.this_table(table_name):
-        fdata.append([db.get_key()] + [record[field] for field in field_list])
+    db.rewind()
+    while not db.eof():
+      if table_name == db.get_table_name():
+        fdata.append([db.get_key()] + [db[field] for field in field_list])
+      db.next()
     df = pd.DataFrame(fdata, None, ['KEY'] + field_list)
+    df.to_csv("df.csv")
     if len(condition) > 0:
       df.query(condition, True)
 
@@ -117,7 +119,6 @@ import tkinter.ttk as ttk
 import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
 import pickle
-import subprocess
 import threading
 
 class ClientScript(list):
@@ -153,14 +154,23 @@ class ClientScript(list):
   @classmethod
   def run(cls, script):
     print("# %s %s started" % (time.strftime('%H:%M:%S'), cls.file()))
+    p = None
     if cls._type is None:
-      # call the main on the caller script with the arguments as a python dict
-      main(*script.get())
+      import multiprocessing
+      p = multiprocessing.Process(None, main, None, script.get())
+      p.start()
+      p.join()
+      p = p.exitcode
     else:
+      import subprocess
       # create a new process and passes the arguments on the command line
-      subprocess.Popen(cls.exe() + [cls._file] + script.getArgs()).wait()
+      p = subprocess.Popen(cls.exe() + [cls._file] + script.getArgs())
+      p.wait()
+      p = p.returncode
 
-    print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
+    if not p:
+      print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
+    return(p)
 
   @classmethod
   def type(cls):
@@ -309,7 +319,12 @@ class smartfilelist(object):
         bm = vulcan.block_model(input_path)
         smartfilelist._cache[input_path] = bm.field_list()
         bm.close()
-      elif(re.search("isis|csv|xls.?$", input_path, re.IGNORECASE)):
+      elif(input_path.lower().endswith(".isis")):
+        import vulcan
+        db = vulcan.isisdb(input_path)
+        smartfilelist._cache[input_path] = db.field_list(db.table_list()[-1])
+        db.close()
+      elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
         # list columns of files handled by pd_get_dataframe
         smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path).columns)
 
@@ -755,19 +770,17 @@ class AppTk(tk.Tk):
   def runScript(self):
     # run the process in another thread as not to block the GUI message loop
     def fork():
+      self.button.configure(state = "disabled")
       self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
-      self.button.configure(state = "disabled")
-      try:
-        ClientScript.run(self.script)
-        self.progress.stop()
-        self.progress.configure(value = 100)
-      except Exception as e:
-        self.progress.stop()
-        messagebox.showerror(message=e,title=sys.argv[0])
-      finally:
-        self.button.configure(state = "enabled")
-        self.progress.configure(mode = "determinate")
+      
+      if ClientScript.run(self.script):
+        messagebox.showwarning(message="Check console messages",title=sys.argv[0])
+
+      self.progress.stop()
+      self.progress.configure(value = 100)
+      self.progress.configure(mode = "determinate")
+      self.button.configure(state = "enabled")
 
     threading.Thread(None, fork).start()
 
