@@ -1,0 +1,7 @@
+#!perl
+
+# usage: $0 input*csv output*csv
+
+print("perl\n");
+
+exit(2);
