@@ -11,7 +11,7 @@ Its a pure python implementation of my similar C++ project [ScriptGui](https://g
 
 ## Features
  - A graphical user interface generated from a simple one line template
- - Run scripts directly from Windows Explorer or a shortcut/icon like a executable/desktop application.
+ - Run scripts directly from Windows Explorer or a shortcut/icon in the same way as a compiled executable.
  - Dynamic lists for the comboboxes. Options can be defined inline or by reading fields from csv and xlsx files.
  - Data persistence and save/load of panel settings using .ini files.
  - Copy the full script command line to clipboard, so you can run it on enviroments without a display (Ex.: telnet/ssh).
