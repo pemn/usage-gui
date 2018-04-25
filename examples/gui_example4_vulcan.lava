@@ -2,6 +2,11 @@
 
 # usage: $0 input*csv output*csv
 
-print("perl\n");
+$\ = chr(10);
 
-exit(2);
+print("$0 ARGV @ARGV");
+
+print("eof");
+
+exit(0);
+
