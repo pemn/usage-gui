@@ -126,16 +126,20 @@ class ClientScript(list):
   # magic signature that a script file must have for defining its gui
   _magic = r"usage:\s*\S+\s*([^\"\'\\]+)"
   _usage = None
-  _file = sys.argv[0]
   _type = None
-  _base = os.path.splitext(sys.argv[0])[0]
-  # HARDCODED list of supporte file types
-  # to add a new file type, just add it to the list
-  for ext in ['csh','lava','pl','bat','vbs','js']:
-    if os.path.exists(_base + '.' + ext):
-      _file = _base + '.' + ext
-      _type = ext.lower()
-      break
+  _file = None
+  _base = None
+  @classmethod
+  def init(cls, client):
+    cls._file = client
+    cls._base = os.path.splitext(cls._file)[0]
+    # HARDCODED list of supporte file types
+    # to add a new file type, just add it to the list
+    for ext in ['csh','lava','pl','bat','vbs','js']:
+      if os.path.exists(cls._base + '.' + ext):
+        cls._file = cls._base + '.' + ext
+        cls._type = ext.lower()
+        break
 
   @classmethod
   def exe(cls):
@@ -707,7 +711,9 @@ class tkTable(ttk.Labelframe):
 class AppTk(tk.Tk):
   '''TK-Based Data driven GUI application'''
   _iconfile_name = None
-  def __init__(self, usage=None):
+  _client = None
+  def __init__(self, usage, client=sys.argv[0]):
+    ClientScript.init(client)
     root = tk.Tk.__init__(self)
     self.title(ClientScript._base)
     
@@ -775,7 +781,7 @@ class AppTk(tk.Tk):
       self.progress.start()
       
       if ClientScript.run(self.script):
-        messagebox.showwarning(message="Check console messages",title=sys.argv[0])
+        messagebox.showwarning(message="Check console messages",title=self._client)
 
       self.progress.stop()
       self.progress.configure(value = 100)
@@ -1041,3 +1047,7 @@ def main(*args):
   print(__name__)
   print(args)
   messagebox.showinfo(message='Business Logic placeholder')
+
+# special entry point for cmd
+if __name__ == '__main__' and sys.argv[0].endswith('_gui.py') and len(sys.argv) == 2:
+  AppTk(None, sys.argv[1]).mainloop()
