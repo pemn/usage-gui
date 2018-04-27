@@ -1,10 +1,9 @@
 # usage-gui
 Data driven gui toolkit for scripts in other languages or python business logic.  
-It tries to fill a role similar to other python modules like guidata and Gooey but is even simpler and with distictive features.
-Another rationale for this project is that we use Tk for backend, while guidata uses Qt and Gooey uses Wx. On some builtin python environments you may have one toolkit available out of the box, and if its Tk, this project may be for you.  
+It tries to fill a role similar to other python modules like guidata and Gooey but is even simpler and with distictive features.  
+Another rationale for this project is that we use Tk for backend, while guidata uses Qt and Gooey uses Wx.  
+On some environments the python interpreter is bundled with a 3rd party application and you may only have one toolkit available. If its Tk, this project may be for you.   
 May also be used to run scripts using the python bundled with the commercial software Maptek Vulcan.  
-
-Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
 
 ## Screenshot
 ![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1os.png)
@@ -63,6 +62,8 @@ Ex.: a,1;b,2;c,3
 ### Example of the "usage:" line which creates a panel like the screenshot above
 `usage: $0 input_csv*csv variable_csv:input_csv some_trully_realy_long_label plain_logical@ table1#variable:input_csv enabler_logical@5 conditional_logical@ conditional_choice1=red,green,blue conditional_entry1 table2#dbfile*csv#key:dbfile output_image*pdf,png,gif,jpg out_of_reach`
 
-
 ## License
 Apache 2.0
+
+## Related projects
+Its a pure python implementation of my similar C++ project [ScriptGui](https://github.com/pemn/ScriptGui)  
