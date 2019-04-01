@@ -22,10 +22,17 @@ https://github.com/pemn/usage-gui
 '''
 
 ### UTIL { ###
-import sys, os, os.path, time
+update_repository = "\\\\macfsclus01\\Geodados\\Geologia\\_Arq_Scripts\\python\\"
 
-# this function handles most of the details required when using a exe interface
+import sys, os, os.path, time
+# fix for wrong path of pythoncomXX.dll in vulcan 10.1.5
+if 'VULCAN_EXE' in os.environ:
+  os.environ['PATH'] += ';' + os.environ['VULCAN_EXE'] + "/Lib/site-packages/pywin32_system32"
+
 def usage_gui(usage = None):
+  '''
+  this function handles most of the details required when using a exe interface
+  '''
   # we already have argument, just proceed with execution
   if(len(sys.argv) > 1):
     # traps help switches: /? -? /h -h /help -help
@@ -38,16 +45,37 @@ def usage_gui(usage = None):
   else:
     AppTk(usage).mainloop()
 
-# convenience function to return a dataframe base on the input file extension
-# bmf: vulcan block model
-# isis: vulcan database
-# csv: ascii table
-# xls: excel table
+
 def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
+  '''
+  convenience function to return a dataframe base on the input file extension
+  bmf: vulcan block model
+  isis: vulcan database
+  csv: ascii table
+  xls: excel table
+  '''
+
+  if table_name is None:
+    input_path, table_name = table_name_selector(input_path)
+
   import pandas as pd
   df = pd.DataFrame()
   if input_path.lower().endswith('csv'):
-    df = pd.read_csv(input_path)
+    df = pd.read_csv(input_path, encoding="latin1")
+    if len(condition) > 0:
+      df.query(condition, True)
+  elif input_path.lower().endswith('xlsx'):
+    if pd.__version__ < '0.20':
+      import openpyxl
+      wb = openpyxl.load_workbook(input_path)
+      data = wb.active.values
+      if table_name and table_name in wb:
+        data = wb[table_name].values
+      cols = next(data)
+      df = pd.DataFrame(data, columns=cols)
+    else:
+      df = pd.read_excel(input_path, table_name)
+
     if len(condition) > 0:
       df.query(condition, True)
   elif input_path.lower().endswith('bmf'):
@@ -59,6 +87,8 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
       vl = filter(bm.is_field, vl)
     df = bm.get_pandas(vl, bm_sanitize_condition(condition))
   elif input_path.lower().endswith('isis'):
+    if os.path.exists(input_path + '_lock'):
+      raise Exception('Input database locked')
     import vulcan
     db = vulcan.isisdb(input_path)
     # by default, use last table which is the desired one in most cases
@@ -72,17 +102,76 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
       if table_name == db.get_table_name():
         fdata.append([db.get_key()] + [db[field] for field in field_list])
       db.next()
-    df = pd.DataFrame(fdata, None, ['KEY'] + field_list)
-    df.to_csv("df.csv")
+    key = db.synonym('GEO','HOLEID')
+    if not key:
+      key = 'KEY'
+    df = pd.DataFrame(fdata, None, [key] + field_list)
+    # df.to_csv('df.csv')
+    if len(condition) > 0:
+      df.query(condition, True)
+  elif input_path.lower().endswith('dm'):
+    import win32com.client
+    dm = win32com.client.Dispatch('DmFile.DmTable')
+    dm.Open(input_path, 0)
+    fdata = []
+    n = dm.Schema.FieldCount + 1
+    for i in range(dm.GetRowCount()):
+      fdata.append([dm.GetColumn(j) for j in range(1, n)])
+      dm.GetNextRow()
+    
+    df = pd.DataFrame(fdata, None, [dm.Schema.GetFieldName(j) for j in range(1, n)])
     if len(condition) > 0:
       df.query(condition, True)
 
   # replace -99 with NaN, meaning they will not be included in the stats
-  if not keep_null:
+  if not int(keep_null):
     df.mask(df == -99, inplace=True)
 
   return(df)
 
+def pd_save_dataframe(df, save_path):
+  import pandas as pd
+  # screen
+  if(df.size > 0):
+    # Excel sheet
+    if save_path.lower().endswith('.xlsx'):
+      df.to_excel(save_path)
+    elif len(save_path) > 0:
+      df.reset_index(inplace=True)
+      if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+      df.to_csv(save_path, index=False)
+    else:
+      print(df.to_string())
+  else:
+    print(save_path,"empty")
+
+def pd_synonyms(df, synonyms):
+  '''
+  from a list of synonyms, find the best candidate amongst the dataframe columns
+  '''
+  if len(synonyms) == 0:
+    return(df.columns[0])
+  # first try a direct match
+  for v in synonyms:
+    if v in df:
+      return(v)
+  # second try a case insensitive match
+  for v in synonyms:
+    m = df.columns.str.match(v, False)
+    if m.any():
+      return(df.columns[m.argmax()])
+  # fail safe to the first column
+  return(df.columns[0])
+
+def table_name_selector(input_path, table_name = None):
+  if table_name is None:
+    m = re.match(r'^(.+)!(\w+)$', input_path)
+    if m:
+      input_path = m.group(1)
+      table_name = m.group(2)
+
+  return(input_path, table_name)
 
 def bm_sanitize_condition(condition):
   if len(condition) > 0:
@@ -109,6 +198,27 @@ def table_field(args, table=False):
     else:
       args = args[args.find(':')+1:]
   return(args)
+
+# wait and unlock block model
+def bmf_wait_lock(path, unlock = False, tries = None):
+    blk_lock = os.path.splitext(path)[0] + ".blk_lock"
+
+    print("waiting lock", blk_lock)
+    while os.path.isfile(blk_lock):
+        if unlock and not tries:
+          os.remove(blk_lock)
+          print("removed lock", blk_lock)
+          break
+        
+        if tries == 0:
+          break
+        if tries is not None:
+          tries -= 1
+          print("waiting lock", blk_lock, tries, "seconds")
+          
+        
+        time.sleep(1)
+        
 
 ### } UTIL ###
 
@@ -310,6 +420,13 @@ class smartfilelist(object):
   _cache = {}
   @staticmethod
   def get(input_path):
+    # special case for multiple files. use first
+    if isinstance(input_path, commalist):
+      if len(input_path):
+        input_path = input_path[0][0]
+      else:
+        input_path = ""
+
     # if this file is already cached, skip to the end
     if(input_path in smartfilelist._cache):
       # do nothing
@@ -331,6 +448,11 @@ class smartfilelist(object):
       elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
         # list columns of files handled by pd_get_dataframe
         smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path).columns)
+      elif(input_path.lower().endswith(".dm")):
+        import win32com.client
+        dm = win32com.client.Dispatch('DmFile.DmTable')
+        dm.Open(input_path, 0)
+        smartfilelist._cache[input_path] = [dm.Schema.GetFieldName(j) for j in range(1, dm.Schema.FieldCount + 1)]
 
     else: # default to a empty list
       smartfilelist._cache[input_path] = []
@@ -579,15 +701,21 @@ class FileEntry(ttk.Frame):
   
   # activate the browse button, which shows a native fileopen dialog and sets the Entry control
   def onBrowse(self):
-    flist = filedialog.askopenfilenames(filetypes=self._wildcard_full)
-    if(isinstance(flist, tuple)):
-      slist = []
-      for n in flist:
-        if os.path.commonpath([n, os.getcwd()]) == os.getcwd():
-          slist.append(os.path.relpath(n))
+    if self._label is not None and self._label['text'].startswith("output"):
+      self.set(filedialog.asksaveasfilename(filetypes=self._wildcard_full))
+    else:
+      flist = filedialog.askopenfilenames(filetypes=self._wildcard_full)
+      if(isinstance(flist, tuple)):
+        slist = []
+        for n in flist:
+          if os.path.commonpath([n, os.getcwd()]) == os.getcwd():
+            slist.append(os.path.relpath(n))
+          else:
+            slist.append(n)
+        if isinstance(self.master, tkTable) and len(slist) > 1:
+          self.master.set(slist)
         else:
-          slist.append(n)
-      self.set(",".join(slist))
+          self.set(",".join(slist))
 
   def onButtonPress(self, *args):
     # temporarily set the cursor to a hourglass
@@ -711,7 +839,6 @@ class tkTable(ttk.Labelframe):
 class AppTk(tk.Tk):
   '''TK-Based Data driven GUI application'''
   _iconfile_name = None
-  _client = None
   def __init__(self, usage, client=sys.argv[0]):
     ClientScript.init(client)
     root = tk.Tk.__init__(self)
@@ -769,8 +896,9 @@ class AppTk(tk.Tk):
     menu_file.add_command(label='Open Settings', command=self.openSettings)
     menu_file.add_command(label='Save Settings', command=self.saveSettings)
     menu_file.add_command(label='Exit', command=self.destroy)
-    menu_help.add_command(label='Help...', command=self.showHelp)
-    menu_help.add_command(label='About...', command=self.showAbout)
+    menu_help.add_command(label='Help', command=self.showHelp)
+    menu_help.add_command(label='Check for Updates', command=self.checkUpdate)
+    menu_help.add_command(label='About', command=self.showAbout)
     self['menu'] = menubar
       
   def runScript(self):
@@ -781,7 +909,7 @@ class AppTk(tk.Tk):
       self.progress.start()
       
       if ClientScript.run(self.script):
-        messagebox.showwarning(message="Check console messages",title=self._client)
+        messagebox.showwarning(message="Check console messages",title=ClientScript.type())
 
       self.progress.stop()
       self.progress.configure(value = 100)
@@ -795,10 +923,33 @@ class AppTk(tk.Tk):
     if os.path.exists(script_pdf):
       os.system(script_pdf)
     else:
-      messagebox.showerror(message='Help file not found',title='Help')
+      messagebox.showerror('Help', 'Documentation file not found')
     
+  def checkUpdate(self):
+    if not os.path.exists(update_repository):
+      messagebox.showerror('Check for Update', 'Repository not found: ' + update_repository)
+      return
+    path_local = ClientScript.file()
+    path_remote = update_repository + ClientScript.file()
+    if not os.path.exists(path_remote):
+      messagebox.showwarning('Check for Update','This file is not included in update the repository')
+      return
+    
+    statinfo_local = os.stat(path_local)
+    statinfo_remote = os.stat(path_remote)
+    if (statinfo_local.st_mtime - statinfo_remote.st_mtime) > 60:
+      messagebox.showinfo('Check for Update', 'This script is up to date')
+      return
+
+    if messagebox.askyesno('Update','A newer version of this script is available. Update?'):
+      from shutil import copy
+      copy(path_remote, path_local)
+      messagebox.showinfo('Check for Update', 'This script was updated and need to be restarted')
+      self.destroy()
+
+
   def showAbout(self):
-    messagebox.showinfo(message='Graphic User Interface to command line scripts',title='About')
+    messagebox.showinfo('About', 'Graphic User Interface to command line scripts')
 
   def openSettings(self):
     result = filedialog.askopenfilename(filetypes=[("ini", "*.ini")])
