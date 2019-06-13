@@ -44,6 +44,8 @@ When it is found, the line containing is parsed into interface controls using th
 text input control with a default value in the combo box
 - `<name>=<list of values separated by ,>`  
 choice combo box
+- `<name>%<list of values separated by ,>`  
+choice radio button
 - `<name>*<extension>(,<extension>...)`  
 file browse control, listing only files that match one of the given extensions
 - `<name>:<another control name>`  
