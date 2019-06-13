@@ -22,7 +22,7 @@ https://github.com/pemn/usage-gui
 '''
 
 ### UTIL { ###
-update_repository = "\\\\macfsclus01\\Geodados\\Geologia\\_Arq_Scripts\\python\\"
+portal_url = "https://portalgisvale.maps.arcgis.com"
 
 import sys, os, os.path, time
 # fix for wrong path of pythoncomXX.dll in vulcan 10.1.5
@@ -46,7 +46,7 @@ def usage_gui(usage = None):
     AppTk(usage).mainloop()
 
 
-def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
+def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
   '''
   convenience function to return a dataframe base on the input file extension
   bmf: vulcan block model
@@ -75,6 +75,8 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
       df = pd.DataFrame(data, columns=cols)
     else:
       df = pd.read_excel(input_path, table_name)
+      if not isinstance(df, pd.DataFrame):
+        _, df = df.popitem(False)
 
     if len(condition) > 0:
       df.query(condition, True)
@@ -127,7 +129,9 @@ def pd_get_dataframe(input_path, condition = "", table_name = None, vl = None, k
   if not int(keep_null):
     df.mask(df == -99, inplace=True)
 
-  return(df)
+  return df
+
+pd_get_dataframe = pd_load_dataframe
 
 def pd_save_dataframe(df, save_path):
   import pandas as pd
@@ -137,7 +141,9 @@ def pd_save_dataframe(df, save_path):
     if save_path.lower().endswith('.xlsx'):
       df.to_excel(save_path)
     elif len(save_path) > 0:
-      df.reset_index(inplace=True)
+      # if index is not a automatic integer index, convert to real columns
+      if not df.index.dtype_str.startswith('int'):
+        df.reset_index(inplace=True)
       if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
       df.to_csv(save_path, index=False)
@@ -151,18 +157,18 @@ def pd_synonyms(df, synonyms):
   from a list of synonyms, find the best candidate amongst the dataframe columns
   '''
   if len(synonyms) == 0:
-    return(df.columns[0])
+    return df.columns[0]
   # first try a direct match
   for v in synonyms:
     if v in df:
-      return(v)
+      return v
   # second try a case insensitive match
   for v in synonyms:
     m = df.columns.str.match(v, False)
     if m.any():
-      return(df.columns[m.argmax()])
+      return df.columns[m.argmax()]
   # fail safe to the first column
-  return(df.columns[0])
+  return df.columns[0]
 
 def table_name_selector(input_path, table_name = None):
   if table_name is None:
@@ -171,9 +177,12 @@ def table_name_selector(input_path, table_name = None):
       input_path = m.group(1)
       table_name = m.group(2)
 
-  return(input_path, table_name)
+  return input_path, table_name
 
 def bm_sanitize_condition(condition):
+  if condition is None:
+    condition = ""
+
   if len(condition) > 0:
 
     # convert a raw condition into a actual block select string
@@ -197,7 +206,7 @@ def table_field(args, table=False):
       args = args[0:args.find(':')]
     else:
       args = args[args.find(':')+1:]
-  return(args)
+  return args
 
 # wait and unlock block model
 def bmf_wait_lock(path, unlock = False, tries = None):
@@ -284,7 +293,7 @@ class ClientScript(list):
 
     if not p:
       print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
-    return(p)
+    return p
 
   @classmethod
   def type(cls):
@@ -315,7 +324,7 @@ class ClientScript(list):
       r = ['arguments']
     else:
       r = cls._usage.split()
-    return(r)
+    return r
 
   @classmethod
   def fields(cls, usage = None):
@@ -327,7 +336,7 @@ class ClientScript(list):
       with open(cls._file, 'r') as file:
         for line in file:
           if re.search(cls._magic, line, re.IGNORECASE):
-            return(line)
+            return line
     return None
 
   @classmethod
@@ -361,8 +370,8 @@ class Settings(str):
     
   def load(self):
     if os.path.exists(self):
-      return(pickle.load(open(self, 'rb')))
-    return({})
+      return pickle.load(open(self, 'rb'))
+    return {}
 
 # subclass of list with a string representation compatible to perl argument input
 # which expects a comma separated list with semicolumns between rows
@@ -389,9 +398,9 @@ class commalist(list):
       if len(r) > 0:
         r += self._rowfs
       r += i
-    return(r)
+    return r
   def __hash__(self):
-    return(len(self))
+    return len(self)
 
   # sometimes we have one element, but that element is ""
   # unless we override, this will evaluate as True
@@ -401,14 +410,62 @@ class commalist(list):
   def split(self, *args):
     return [",".join(_) for _ in self]
 
-def dgd_list_layers(input_path):
+def dgd_list_layers(file_path):
   import vulcan
   r = []
   # return the list of layers stored in a dgd
-  db = vulcan.isisdb(input_path)
+  db = vulcan.isisdb(file_path)
   for record in db.keys:
     if db.get_key().find('$') == -1:
       r.append(db.get_key())
+  return r
+
+def bmf_field_list(file_path):
+  import vulcan
+  bm = vulcan.block_model(file_path)
+  r = bm.field_list()
+  bm.close()
+  return r
+
+def isisdb_field_list(file_path):
+  import vulcan
+  db = vulcan.isisdb(file_path)
+  r = db.field_list(db.table_list()[-1])
+  db.close()
+  return r
+
+def dm_field_list(file_path):
+  import win32com.client
+  dm = win32com.client.Dispatch('DmFile.DmTable')
+  dm.Open(file_path, 0)
+  r = [dm.Schema.GetFieldName(j) for j in range(1, dm.Schema.FieldCount + 1)]
+  return r
+
+
+def gis_portal_get_info(portal_url, portal_item_id, layer = None, field = None):
+  r = []
+  try:
+    from arcgis.gis import GIS
+  except:
+    messagebox.showerror(message='arcgis python module not found')
+    return r
+  
+  gis = GIS(portal_url)
+  
+  portal_item = gis.content.get(portal_item_id)
+
+
+  for feature_layer in portal_item.layers:
+    if layer is None or feature_layer.name == layer:
+      if field is None:
+        r = [f.name for f in feature_layer.properties.fields]
+      else:
+        r = feature_layer.get_unique_values(field)
+
+    # if not layer specified, use first layer only
+    if layer is None:
+      break
+
   return r
 
 class smartfilelist(object):
@@ -431,33 +488,28 @@ class smartfilelist(object):
     if(input_path in smartfilelist._cache):
       # do nothing
       pass
-    elif(os.path.exists(input_path)):
-      if(input_path.lower().endswith(".dgd.isis")):
-        # list layers of dgd files
+    else:
+      # default to a empty list
+      smartfilelist._cache[input_path] = []
+      input_path, table_name = table_name_selector(input_path)
+      if(not os.path.exists(input_path)):
+        pass
+      elif(input_path.lower().endswith(".dgd.isis")):
+        # list layers of vulcan dgd files
         smartfilelist._cache[input_path] = dgd_list_layers(input_path)
       elif(input_path.lower().endswith(".bmf")):
-        import vulcan
-        bm = vulcan.block_model(input_path)
-        smartfilelist._cache[input_path] = bm.field_list()
-        bm.close()
+        # vulcan block model
+        smartfilelist._cache[input_path] = bmf_field_list(input_path)
       elif(input_path.lower().endswith(".isis")):
-        import vulcan
-        db = vulcan.isisdb(input_path)
-        smartfilelist._cache[input_path] = db.field_list(db.table_list()[-1])
-        db.close()
+        # vulcan isis database
+        smartfilelist._cache[input_path] = isisdb_field_list(input_path)
       elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
         # list columns of files handled by pd_get_dataframe
-        smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path).columns)
+        smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path, "", table_name).columns)
       elif(input_path.lower().endswith(".dm")):
-        import win32com.client
-        dm = win32com.client.Dispatch('DmFile.DmTable')
-        dm.Open(input_path, 0)
-        smartfilelist._cache[input_path] = [dm.Schema.GetFieldName(j) for j in range(1, dm.Schema.FieldCount + 1)]
+        smartfilelist._cache[input_path] = dm_field_list
 
-    else: # default to a empty list
-      smartfilelist._cache[input_path] = []
-
-    return(smartfilelist._cache[input_path])
+    return smartfilelist._cache[input_path]
 
 class UsageToken(str):
   '''handles the token format used to creating controls'''
@@ -466,7 +518,7 @@ class UsageToken(str):
   _data = None
   def __init__(self, arg):
     super().__init__()
-    m = re.match(r"(\w*)(\*|@|#|=|:)(.*)", arg)
+    m = re.match(r"(\w*)(\*|@|#|=|:|%|~)(.*)", arg)
     if (m):
       self._name = m.group(1)
       self._type = m.group(2)
@@ -504,6 +556,10 @@ class ScriptFrame(ttk.Frame):
         c = ComboPicker(self, token.name, token.data)
       elif token.type == '#':
         c = tkTable(self, token.name, token.data.split('#'))
+      elif token.type == '~':
+        c = QueryService(self, token.name, portal_url, token.data)
+      elif token.type == '%':
+        c = LabelRadio(self, token.name, token.data)
       elif token.name:
         c = LabelEntry(self, token.name)
       else:
@@ -538,7 +594,7 @@ class ScriptFrame(ttk.Frame):
         arg = '"' + arg + '"'
       args.append(arg)
 
-    return(args)
+    return args
   
   def set(self, values):
     if isinstance(values, dict):
@@ -560,7 +616,6 @@ class LabelEntry(ttk.Frame):
     if isinstance(master, tkTable):
       self._control = ttk.Entry(self)
     else:
-      #self._control = ttk.Entry(self, width=60)
       self._control = ttk.Entry(self)
       self._label = ttk.Label(self, text=label, width=-20)
       self._label.pack(side=tk.LEFT)
@@ -568,7 +623,7 @@ class LabelEntry(ttk.Frame):
     self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
     
   def get(self):
-    return(self._control.get())
+    return self._control.get()
    
   def set(self, value):
     if(value == None or len(value) == 0):
@@ -581,6 +636,19 @@ class LabelEntry(ttk.Frame):
       self._label.configure(**kw)
     self._control.configure(**kw)
   
+class LabelRadio(ttk.Labelframe):
+  def __init__(self, master, label, source):
+    self._variable = tk.StringVar()
+    ttk.Labelframe.__init__(self, master, name=label, text=label)
+    for _ in source.split(','):
+      ttk.Radiobutton(self, variable=self._variable, text=_, value=_).pack(anchor="w")
+
+  def get(self):
+    return self._variable.get()
+    
+  def set(self, value):
+    return self._variable.set(value)
+
 class CheckBox(ttk.Checkbutton):
   '''superset of checkbutton with a builtin variable'''
   def __init__(self, master, label, reach=0):
@@ -606,11 +674,11 @@ class CheckBox(ttk.Checkbutton):
           v.configure(state = "enabled" if value else "disabled")
 
   def get(self):
-    return(int(self._variable.get()))
+    return int(self._variable.get())
     
   def set(self, value):
     #self.onButtonPress()
-    return(self._variable.set(value))
+    return self._variable.set(value)
 
 class LabelCombo(ttk.Frame):
   _label = None
@@ -630,10 +698,10 @@ class LabelCombo(ttk.Frame):
       self.setValues(source.split(","))
 
   def get(self):
-    return(self._control.get())
+    return self._control.get()
   
   def set(self, value):
-    self._control.set(value)
+    return self._control.set(value)
   
   def setValues(self, values):
     self._control['values'] = values
@@ -708,7 +776,7 @@ class FileEntry(ttk.Frame):
       if(isinstance(flist, tuple)):
         slist = []
         for n in flist:
-          if os.path.commonpath([n, os.getcwd()]) == os.getcwd():
+          if os.path.commonpath([n, os.getcwd()]).lower() == os.getcwd().lower():
             slist.append(os.path.relpath(n))
           else:
             slist.append(n)
@@ -731,7 +799,7 @@ class FileEntry(ttk.Frame):
     self._control['cursor'] = ''
 
   def get(self):
-    return(self._control.get())
+    return self._control.get()
   
   def set(self, value):
     if(value == None or len(value) == 0):
@@ -775,7 +843,7 @@ class tkTable(ttk.Labelframe):
   
     elif(row < len(self._cells) and col < len(self._columns)):
       value = self._cells[row][col+1].get()
-    return(value)
+    return value
 
   # set the widget values, expanding the table rows as needed
   # input data must be a string containing a serialized commalist
@@ -834,6 +902,81 @@ class tkTable(ttk.Labelframe):
         v.configure(**kw)
     else:
       super().configure(**kw)
+
+class QueryService(ttk.LabelFrame):
+  ''' Retrieves the list from a web service '''
+  # cache the last selected field
+  _field = None
+  def __init__(self, master, label, uri_value = None, pid_value = None):
+    # create a container frame for the combo and label
+    ttk.Labelframe.__init__(self, master, name=label, text=label)
+    self.columnconfigure(1, weight=1)
+
+    ttk.Label(self, text='Ꚙ').grid(row=0, column=0)
+    ttk.Label(self, text='⚡').grid(row=1, column=0)
+    ttk.Label(self, text='⛚').grid(row=2, column=0)
+    ttk.Label(self, text='☰').grid(row=3, column=0)
+    
+    self._uri = ttk.Entry(self)
+    self._uri.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
+    self._pid = ttk.Entry(self)
+    self._pid.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
+    self._where  = ttk.Combobox(self)
+    self._where.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=2, column=1)
+    self._which = ttk.Combobox(self)
+    self._which.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=3, column=1)
+
+    self._where.bind("<ButtonPress>", self.onButtonPressWhere)
+    self._which.bind("<ButtonPress>", self.onButtonPressWhich)
+
+    if uri_value:
+      self._uri.insert(0, uri_value)
+    if pid_value:
+      self._pid.insert(0, pid_value)
+    
+  def get(self):
+    return '='.join([self._where.get(), self._which.get()])
+   
+  def set(self, value):
+    if(value == None or len(value) == 0):
+      return
+    if not isinstance(value, list):
+      value = value.split('=')
+    
+    if len(value):
+      self._where.delete(0, tk.END)
+      self._where.insert(0, value[0])
+
+    if len(value) > 1:
+      self._which.delete(0, tk.END)
+      self._which.insert(0, value[1])
+
+  def configure(self, **kw):
+    self._which.configure(**kw)
+
+  def onButtonPressWhere(self, *args):
+    if len(self._where['values']) == 0:
+      self.populateCombo(self._where)
+
+  def onButtonPressWhich(self, *args):
+    field_value = self._where.get()
+    if field_value:
+      if len(self._which['value']) == 0 or field_value != self._field:
+        self._field = field_value
+        self.populateCombo(self._which, None, field_value)
+
+  def populateCombo(self, combo_widget, layer = None, field = None):
+    uri_value = self._uri.get()
+    pid_value = self._pid.get()
+
+    combo_widget['cursor'] = 'watch'
+
+    values = gis_portal_get_info(uri_value, pid_value, layer, field)
+
+    combo_widget['values'] = values
+
+    combo_widget['cursor'] = ''
+
 
 # main frame
 class AppTk(tk.Tk):
@@ -897,7 +1040,6 @@ class AppTk(tk.Tk):
     menu_file.add_command(label='Save Settings', command=self.saveSettings)
     menu_file.add_command(label='Exit', command=self.destroy)
     menu_help.add_command(label='Help', command=self.showHelp)
-    menu_help.add_command(label='Check for Updates', command=self.checkUpdate)
     menu_help.add_command(label='About', command=self.showAbout)
     self['menu'] = menubar
       
@@ -925,29 +1067,6 @@ class AppTk(tk.Tk):
     else:
       messagebox.showerror('Help', 'Documentation file not found')
     
-  def checkUpdate(self):
-    if not os.path.exists(update_repository):
-      messagebox.showerror('Check for Update', 'Repository not found: ' + update_repository)
-      return
-    path_local = ClientScript.file()
-    path_remote = update_repository + ClientScript.file()
-    if not os.path.exists(path_remote):
-      messagebox.showwarning('Check for Update','This file is not included in update the repository')
-      return
-    
-    statinfo_local = os.stat(path_local)
-    statinfo_remote = os.stat(path_remote)
-    if (statinfo_local.st_mtime - statinfo_remote.st_mtime) > 60:
-      messagebox.showinfo('Check for Update', 'This script is up to date')
-      return
-
-    if messagebox.askyesno('Update','A newer version of this script is available. Update?'):
-      from shutil import copy
-      copy(path_remote, path_local)
-      messagebox.showinfo('Check for Update', 'This script was updated and need to be restarted')
-      self.destroy()
-
-
   def showAbout(self):
     messagebox.showinfo('About', 'Graphic User Interface to command line scripts')
 
