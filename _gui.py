@@ -649,6 +649,13 @@ class LabelRadio(ttk.Labelframe):
   def set(self, value):
     return self._variable.set(value)
 
+  def configure(self, **kw):
+    if "state" in kw:
+      for v in self.children.values():
+        v.configure(**kw)
+    else:
+      super().configure(**kw)
+
 class CheckBox(ttk.Checkbutton):
   '''superset of checkbutton with a builtin variable'''
   def __init__(self, master, label, reach=0):
