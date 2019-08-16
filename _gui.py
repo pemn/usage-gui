@@ -555,7 +555,7 @@ def pd_save_tri(df, output_path):
       tri.set_rgb(rgb.tolist())
     else:
       print('color index ', df.iloc[0, 4])
-      tri.set_colour(df.iloc[0, 4])
+      tri.set_colour(int(df.iloc[0, 4]))
 
   node_list = []
   
