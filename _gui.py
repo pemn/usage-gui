@@ -22,12 +22,37 @@ https://github.com/pemn/usage-gui
 '''
 
 ### UTIL { ###
-portal_url = "https://portalgisvale.maps.arcgis.com"
+portal_url_default = "https://portalgisvale.maps.arcgis.com"
 
 import sys, os, os.path, time
+# import modules from a pyz (zip) file with same name as scripts
+# sys.path.append(os.path.splitext(sys.argv[0])[0] + '.pyz')
+sys.path.insert(0, os.path.splitext(sys.argv[0])[0] + '.pyz')
+import numpy as np
+import pandas as pd
+
 # fix for wrong path of pythoncomXX.dll in vulcan 10.1.5
 if 'VULCAN_EXE' in os.environ:
   os.environ['PATH'] += ';' + os.environ['VULCAN_EXE'] + "/Lib/site-packages/pywin32_system32"
+
+def pyd_zip_extract():
+  from zipfile import ZipFile
+  pyz = ZipFile(os.path.splitext(sys.argv[0])[0] + '.pyz')
+  # extract any pyd library to current folder since they are not supported by zipimport
+  # also, extract modules which for other reasons do no work inside a zip
+  platform_arch = '.cp%s%s-win_amd64' % tuple(sys.version.split('.')[:2])
+  for name in pyz.namelist():
+    if re.match('[^/]+' + platform_arch + r'\.(pyd|zip)$', name, re.IGNORECASE):
+      if name.endswith('zip'):
+        # workaround for some weird bug in python 3.5
+        if sys.hexversion < 0x3070000:
+          pyz.extract(name)
+          ZipFile(name).extractall()
+          os.remove(name)
+        else:
+          ZipFile(pyz.open(name)).extractall()
+      elif not os.path.exists(name):
+        pyz.extract(name)
 
 def usage_gui(usage = None):
   '''
@@ -45,7 +70,6 @@ def usage_gui(usage = None):
   else:
     AppTk(usage).mainloop()
 
-
 def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
   '''
   convenience function to return a dataframe base on the input file extension
@@ -58,72 +82,26 @@ def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, 
   if table_name is None:
     input_path, table_name = table_name_selector(input_path)
 
-  import pandas as pd
-  df = pd.DataFrame()
+  df = None
   if input_path.lower().endswith('csv'):
     df = pd.read_csv(input_path, encoding="latin1")
-    if len(condition) > 0:
-      df.query(condition, True)
-  elif input_path.lower().endswith('xlsx'):
-    if pd.__version__ < '0.20':
-      import openpyxl
-      wb = openpyxl.load_workbook(input_path)
-      data = wb.active.values
-      if table_name and table_name in wb:
-        data = wb[table_name].values
-      cols = next(data)
-      df = pd.DataFrame(data, columns=cols)
-    else:
-      df = pd.read_excel(input_path, table_name)
-      if not isinstance(df, pd.DataFrame):
-        _, df = df.popitem(False)
-
-    if len(condition) > 0:
-      df.query(condition, True)
+  elif re.search(r'xls\w?$', input_path, re.IGNORECASE):
+    df = pd_load_excel(input_path, condition, table_name)
   elif input_path.lower().endswith('bmf'):
-    import vulcan
-    bm = vulcan.block_model(input_path)
-
-    # get a DataFrame with block model data
-    if vl is not None:
-      vl = filter(bm.is_field, vl)
-    df = bm.get_pandas(vl, bm_sanitize_condition(condition))
+    df = pd_load_bmf(input_path, condition)
+  elif input_path.lower().endswith('dgd.isis'):
+    df = pd_load_dgd(input_path, table_name)
   elif input_path.lower().endswith('isis'):
-    if os.path.exists(input_path + '_lock'):
-      raise Exception('Input database locked')
-    import vulcan
-    db = vulcan.isisdb(input_path)
-    # by default, use last table which is the desired one in most cases
-    if table_name is None or table_name not in db.table_list():
-      table_name = db.table_list()[-1]
-
-    field_list = list(db.field_list(table_name))
-    fdata = []
-    db.rewind()
-    while not db.eof():
-      if table_name == db.get_table_name():
-        fdata.append([db.get_key()] + [db[field] for field in field_list])
-      db.next()
-    key = db.synonym('GEO','HOLEID')
-    if not key:
-      key = 'KEY'
-    df = pd.DataFrame(fdata, None, [key] + field_list)
-    # df.to_csv('df.csv')
-    if len(condition) > 0:
-      df.query(condition, True)
+    df = pd_load_isisdb(input_path, condition, table_name)
+  elif input_path.lower().endswith('00t'):
+    df = pd_load_tri(input_path)
   elif input_path.lower().endswith('dm'):
-    import win32com.client
-    dm = win32com.client.Dispatch('DmFile.DmTable')
-    dm.Open(input_path, 0)
-    fdata = []
-    n = dm.Schema.FieldCount + 1
-    for i in range(dm.GetRowCount()):
-      fdata.append([dm.GetColumn(j) for j in range(1, n)])
-      dm.GetNextRow()
-    
-    df = pd.DataFrame(fdata, None, [dm.Schema.GetFieldName(j) for j in range(1, n)])
-    if len(condition) > 0:
-      df.query(condition, True)
+    df = pd_load_dm(input_path, condition)
+  else:
+    df = pd.DataFrame()
+
+  if len(condition) > 0:
+    df.query(condition, True)
 
   # replace -99 with NaN, meaning they will not be included in the stats
   if not int(keep_null):
@@ -131,26 +109,31 @@ def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, 
 
   return df
 
+# temporary backward compatibility
 pd_get_dataframe = pd_load_dataframe
 
-def pd_save_dataframe(df, save_path):
-  import pandas as pd
+def pd_save_dataframe(df, output_path):
   # screen
   if(df.size > 0):
     # Excel sheet
-    if save_path.lower().endswith('.xlsx'):
-      df.to_excel(save_path)
-    elif len(save_path) > 0:
+    real_index = not df.index.dtype_str.startswith('int')
+    if output_path.lower().endswith('.xlsx'):
+      df.to_excel(output_path, index=real_index)
+    elif output_path.lower().endswith('.dgd.isis'):
+      pd_save_dgd(df, output_path)
+    elif output_path.lower().endswith('.00t'):
+      pd_save_tri(df, output_path)
+    elif len(output_path) > 0:
       # if index is not a automatic integer index, convert to real columns
-      if not df.index.dtype_str.startswith('int'):
-        df.reset_index(inplace=True)
-      if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
-      df.to_csv(save_path, index=False)
+      # if not df.index.dtype_str.startswith('int'):
+      #   df.reset_index(inplace=True)
+      # if isinstance(df.columns, pd.MultiIndex):
+      #   df.columns = df.columns.droplevel(1)
+      df.to_csv(output_path, index=real_index)
     else:
       print(df.to_string())
   else:
-    print(save_path,"empty")
+    print(output_path,"empty")
 
 def pd_synonyms(df, synonyms):
   '''
@@ -420,12 +403,24 @@ def dgd_list_layers(file_path):
       r.append(db.get_key())
   return r
 
+# Vulcan BMF
+
 def bmf_field_list(file_path):
   import vulcan
   bm = vulcan.block_model(file_path)
   r = bm.field_list()
   bm.close()
   return r
+
+def pd_load_bmf(input_path, condition = ''):
+  import vulcan
+  bm = vulcan.block_model(input_path)
+  # get a DataFrame with block model data
+  if vl is not None:
+    vl = filter(bm.is_field, vl)
+  return bm.get_pandas(vl, bm_sanitize_condition(condition))
+
+# Vulcan ISIS database
 
 def isisdb_field_list(file_path):
   import vulcan
@@ -434,6 +429,169 @@ def isisdb_field_list(file_path):
   db.close()
   return r
 
+def pd_load_isisdb(input_path, condition = '', table_name = None):
+    if os.path.exists(input_path + '_lock'):
+      raise Exception('Input database locked')
+    import vulcan
+    db = vulcan.isisdb(input_path)
+    # by default, use last table which is the desired one in most cases
+    if table_name is None or table_name not in db.table_list():
+      table_name = db.table_list()[-1]
+
+    field_list = list(db.field_list(table_name))
+    fdata = []
+    db.rewind()
+    while not db.eof():
+      if table_name == db.get_table_name():
+        fdata.append([db.get_key()] + [db[field] for field in field_list])
+      db.next()
+    key = db.synonym('GEO','HOLEID')
+    if not key:
+      key = 'KEY'
+    df = pd.DataFrame(fdata, None, [key] + field_list)
+    # df.to_csv('df.csv')
+    if len(condition) > 0:
+      df.query(condition, True)
+    return df
+
+def pd_load_dgd(input_path, layer_dgd = None):
+  ''' create a dataframe with object points and attributes '''
+  import vulcan
+  obj_attr = ['value', 'name', 'group', 'feature', 'description']
+  df = pd.DataFrame(None, columns=['x', 'y', 'z', 'w', 't', 'p', 'n', 'closed', 'layer'] + obj_attr)
+
+  dgd = vulcan.dgd(input_path)
+
+  if dgd.is_open():
+    layers = layer_dgd
+    if layer_dgd is None:
+      layers = dgd.list_layers()
+    elif not isinstance(layer_dgd, list):
+      layers = [layer_dgd]
+
+    for l in layers:
+      if not dgd.is_layer(l):
+        continue
+      layer = dgd.get_layer(l)
+      for obj in layer:
+        for n in range(obj.num_points()):
+          row = len(df)
+          df.loc[row] = [None] * df.shape[1]
+          p = obj.get_point(n)
+          df.loc[row, 'x'] = p.get_x()
+          df.loc[row, 'y'] = p.get_y()
+          df.loc[row, 'z'] = p.get_z()
+          df.loc[row, 'w'] = p.get_w()
+          df.loc[row, 't'] = p.get_t()
+          df.loc[row, 'p'] = p.get_name()
+          df.loc[row, 'n'] = n
+          df.loc[row, 'closed'] = obj.is_closed()
+          df.loc[row, 'layer'] = layer.get_name()
+          for t in obj_attr:
+            df.loc[row, t] = getattr(obj, t)
+
+  return df
+
+def pd_save_dgd(df, output_path):
+  ''' create a vulcan objects from a dataframe '''
+  import vulcan
+  obj_attr = ['value', 'name', 'group', 'feature', 'description']
+  dgd = vulcan.dgd(output_path, 'w' if os.path.exists(output_path) else 'c')
+
+  layer_cache = dict()
+  
+  c = []
+  n = None
+  for row in df.index:
+    layer_name = df.loc[row, 'layer']
+    if layer_name not in layer_cache:
+      layer_cache[layer_name] = vulcan.layer(layer_name)
+    
+    n = df.loc[row, 'n']
+    # last row special case
+    if row == df.index[-1]:
+      c.append(row)
+      n = 0
+
+    if n == 0 and len(c):
+      points = df.take(c).take(range(5), 1).values.tolist()
+      obj = vulcan.polyline(points)
+      for i in range(len(obj_attr)):
+        v = str(df.loc[c[0], obj_attr[i]])
+        if i == 0:
+          v = float(df.loc[c[0], obj_attr[i]])
+
+        setattr(obj, obj_attr[i], v)
+
+      layer_cache[layer_name].append(obj)
+      c.clear()
+
+    c.append(row)
+
+  for v in layer_cache.values():
+    dgd.save_layer(v)
+
+# Vulcan Triangulation 00t
+def pd_load_tri(input_path):
+  import vulcan
+  tri = vulcan.triangulation(input_path)
+  cv = tri.get_colour()
+  cn = 'colour'
+  if tri.is_rgb():
+    cv = np.sum(np.multiply(tri.get_rgb(), [2**16,2**8,1]))
+    cn = 'rgb'
+
+  return pd.DataFrame([tri.node[int(v)] + [v,cv] for f in tri.get_faces() for v in f], columns=['x','y','z','node',cn])
+
+def pd_save_tri(df, output_path):
+  node_name = df.columns[3]
+  import vulcan
+  tri = vulcan.triangulation("", "w")
+  # the fifth column is color
+  if len(df.columns) >= 5:
+    if 'rgb' in df:
+      rgb = np.floor(np.divide(np.mod(np.repeat(df.iloc[0, 4],3), [2**32, 2**16, 2**8]), [2**16,2**8,1]))
+      print('color r %d g %d b %d' % tuple(rgb))
+      tri.set_rgb(rgb.tolist())
+    else:
+      print('color index ', df.iloc[0, 4])
+      tri.set_colour(df.iloc[0, 4])
+
+  node_list = []
+  
+  node_sort = df[node_name].sort_values()
+  for i in node_sort.index:
+    n = df.loc[i, node_name]
+    if n not in node_list:
+      node_list.append(n)
+      tri.add_node(df.iloc[i, 0],df.iloc[i, 1],df.iloc[i, 2])
+
+  f = []
+  for i in df.index:
+    f.append(int(df.loc[i, node_name]))
+    if len(f) == 3:
+      tri.add_face(*f)
+      f.clear()
+
+  tri.save(output_path)
+
+# Datamine DM
+
+def pd_load_dm(input_path, condition = ''):
+  import win32com.client
+  dm = win32com.client.Dispatch('DmFile.DmTable')
+  dm.Open(input_path, 0)
+  fdata = []
+  n = dm.Schema.FieldCount + 1
+  for i in range(dm.GetRowCount()):
+    fdata.append([dm.GetColumn(j) for j in range(1, n)])
+    dm.GetNextRow()
+  
+  df = pd.DataFrame(fdata, None, [dm.Schema.GetFieldName(j) for j in range(1, n)])
+  if len(condition) > 0:
+    df.query(condition, True)
+  return df
+
 def dm_field_list(file_path):
   import win32com.client
   dm = win32com.client.Dispatch('DmFile.DmTable')
@@ -441,32 +599,43 @@ def dm_field_list(file_path):
   r = [dm.Schema.GetFieldName(j) for j in range(1, dm.Schema.FieldCount + 1)]
   return r
 
+# Microsoft Excel compatibles
 
-def gis_portal_get_info(portal_url, portal_item_id, layer = None, field = None):
-  r = []
-  try:
-    from arcgis.gis import GIS
-  except:
-    messagebox.showerror(message='arcgis python module not found')
-    return r
+def pd_load_excel(input_path, condition = '', table_name = None):
+  df = None
+  if pd.__version__ < '0.20':
+    import openpyxl
+    wb = openpyxl.load_workbook(input_path)
+    data = wb.active.values
+    if table_name and table_name in wb:
+      data = wb[table_name].values
+    cols = next(data)
+    df = pd.DataFrame(data, columns=cols)
+  else:
+    df = pd.read_excel(input_path, table_name)
+    if not isinstance(df, pd.DataFrame):
+      _, df = df.popitem(False)
+  return df
+
+# ESRI shape
+
+def shape_field_list(file_path):
+  import shapefile
+  shapes = shapefile.Reader(file_path)
+  return [shapes.fields[i][0] for i in range(1, len(shapes.fields))]
+
+# ESRI ArcGis Online
+
+def gis_portal_smartlist(portal_url, itemid, layerid = None, field = None):
+  gp = GisPortal(portal_url, itemid, layerid)
   
-  gis = GIS(portal_url)
+  if not gp.connected():
+    return gp.get_layer_names()
   
-  portal_item = gis.content.get(portal_item_id)
+  if field is None:
+    return gp.get_layer_fields()
 
-
-  for feature_layer in portal_item.layers:
-    if layer is None or feature_layer.name == layer:
-      if field is None:
-        r = [f.name for f in feature_layer.properties.fields]
-      else:
-        r = feature_layer.get_unique_values(field)
-
-    # if not layer specified, use first layer only
-    if layer is None:
-      break
-
-  return r
+  return gp.get_unique_values(field)
 
 class smartfilelist(object):
   '''
@@ -497,17 +666,22 @@ class smartfilelist(object):
       elif(input_path.lower().endswith(".dgd.isis")):
         # list layers of vulcan dgd files
         smartfilelist._cache[input_path] = dgd_list_layers(input_path)
-      elif(input_path.lower().endswith(".bmf")):
-        # vulcan block model
-        smartfilelist._cache[input_path] = bmf_field_list(input_path)
       elif(input_path.lower().endswith(".isis")):
         # vulcan isis database
         smartfilelist._cache[input_path] = isisdb_field_list(input_path)
+      elif(input_path.lower().endswith(".bmf")):
+        # vulcan block model
+        smartfilelist._cache[input_path] = bmf_field_list(input_path)
+      elif(input_path.lower().endswith(".00t")):
+        smartfilelist._cache[input_path] = ['x','y','z','node','index','rgb']
       elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
         # list columns of files handled by pd_get_dataframe
         smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path, "", table_name).columns)
       elif(input_path.lower().endswith(".dm")):
-        smartfilelist._cache[input_path] = dm_field_list
+        smartfilelist._cache[input_path] = dm_field_list(input_path)
+      elif(input_path.lower().endswith(".shp")):
+        # ESRI shape file
+        smartfilelist._cache[input_path] = shape_field_list(input_path)
 
     return smartfilelist._cache[input_path]
 
@@ -553,11 +727,14 @@ class ScriptFrame(ttk.Frame):
       elif token.type == '=':
         c = LabelCombo(self, token.name, token.data)
       elif token.type == ':':
-        c = ComboPicker(self, token.name, token.data)
+        if token.data == 'portal':
+          c = ArcGisField(self, token.name, token.data)
+        else:
+          c = ComboPicker(self, token.name, token.data)
       elif token.type == '#':
         c = tkTable(self, token.name, token.data.split('#'))
       elif token.type == '~':
-        c = QueryService(self, token.name, portal_url, token.data)
+        c = ArcGisPortal(self, token.name, portal_url_default, token.data)
       elif token.type == '%':
         c = LabelRadio(self, token.name, token.data)
       elif token.name:
@@ -910,80 +1087,154 @@ class tkTable(ttk.Labelframe):
     else:
       super().configure(**kw)
 
-class QueryService(ttk.LabelFrame):
+class ArcGisField(ttk.LabelFrame):
   ''' Retrieves the list from a web service '''
   # cache the last selected field
   _field = None
-  def __init__(self, master, label, uri_value = None, pid_value = None):
+  _delim = '='
+  _state = None
+  def __init__(self, master, label, source):
+    self._source = source
     # create a container frame for the combo and label
     ttk.Labelframe.__init__(self, master, name=label, text=label)
     self.columnconfigure(1, weight=1)
 
-    ttk.Label(self, text='Ꚙ').grid(row=0, column=0)
+    ttk.Label(self, text='⎥⎥⎥').grid(row=0, column=0)
     ttk.Label(self, text='⚡').grid(row=1, column=0)
-    ttk.Label(self, text='⛚').grid(row=2, column=0)
-    ttk.Label(self, text='☰').grid(row=3, column=0)
     
-    self._uri = ttk.Entry(self)
-    self._uri.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
-    self._pid = ttk.Entry(self)
-    self._pid.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
-    self._where  = ttk.Combobox(self)
-    self._where.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=2, column=1)
-    self._which = ttk.Combobox(self)
-    self._which.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=3, column=1)
+    self._col  = ttk.Combobox(self)
+    self._col.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
+    self._val = ttk.Combobox(self)
+    self._val.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
 
-    self._where.bind("<ButtonPress>", self.onButtonPressWhere)
-    self._which.bind("<ButtonPress>", self.onButtonPressWhich)
-
-    if uri_value:
-      self._uri.insert(0, uri_value)
-    if pid_value:
-      self._pid.insert(0, pid_value)
+    self._col.bind("<ButtonPress>", self.onButtonPressCol)
+    self._val.bind("<ButtonPress>", self.onButtonPressVal)
     
   def get(self):
-    return '='.join([self._where.get(), self._which.get()])
+    value = [self._col.get(), self._val.get()]
+    
+    if value[0] and value[1]:
+      return self._delim.join(value)
+    
+    return value[0]
    
   def set(self, value):
     if(value == None or len(value) == 0):
       return
     if not isinstance(value, list):
-      value = value.split('=')
-    
-    if len(value):
-      self._where.delete(0, tk.END)
-      self._where.insert(0, value[0])
-
+      value = value.split(self._delim)
+    if len(value) > 0:
+      self._col.set(value[0])
     if len(value) > 1:
-      self._which.delete(0, tk.END)
-      self._which.insert(0, value[1])
+      self._val.set(value[1])
 
   def configure(self, **kw):
-    self._which.configure(**kw)
+    self._col.configure(**kw)
+    self._val.configure(**kw)
 
-  def onButtonPressWhere(self, *args):
-    if len(self._where['values']) == 0:
-      self.populateCombo(self._where)
+  def onButtonPressCol(self, *args):
+    if not self._source:
+      return
 
-  def onButtonPressWhich(self, *args):
-    field_value = self._where.get()
-    if field_value:
-      if len(self._which['value']) == 0 or field_value != self._field:
-        self._field = field_value
-        self.populateCombo(self._which, None, field_value)
+    source_widget = self.master.nametowidget(self._source)
+    
+    if not source_widget:
+      return
 
-  def populateCombo(self, combo_widget, layer = None, field = None):
+    portal = source_widget.get()
+
+    if portal == self._state:
+      return
+    self._state = portal
+
+    self._col['cursor'] = 'watch'
+    self._col['values'] = gis_portal_smartlist(None, portal)
+    self._col['cursor'] = ''
+
+  def onButtonPressVal(self, *args):
+    if not self._source:
+      return
+
+    if not self._col.get():
+      return
+
+    source_widget = self.master.nametowidget(self._source)
+    
+    if not source_widget:
+      return
+
+    col = self._col.get()
+    if not col or col == self._state:
+      return
+    self._state = col
+
+    portal = source_widget.get()
+
+    self._val['cursor'] = 'watch'
+    self._val['values'] = gis_portal_smartlist(None, portal, None, col)
+    self._val['cursor'] = ''
+
+class ArcGisPortal(ttk.LabelFrame):
+  ''' Retrieves the list from a web service '''
+  # cache the last selected field
+  _field = None
+  _delim = ':'
+  _state = None
+  def __init__(self, master, label, uri_value = None, pid_value = None):
+    # create a container frame for the combo and label
+    ttk.Labelframe.__init__(self, master, name=label, text=label)
+    self.columnconfigure(1, weight=1)
+
+    ttk.Label(self, text='⛅').grid(row=0, column=0)
+    ttk.Label(self, text='✨').grid(row=1, column=0)
+    ttk.Label(self, text='⧉').grid(row=2, column=0)
+    
+    self._uri = ttk.Entry(self)
+    self._uri.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
+    self._pid = ttk.Combobox(self)
+    self._pid.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
+    self._lid  = ttk.Combobox(self)
+    self._lid.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=2, column=1)
+
+    self._lid.bind("<ButtonPress>", self.onButtonPressLid)
+
+    if uri_value:
+      self._uri.insert(0, uri_value)    
+    if pid_value:
+      self._pid.set(pid_value)
+
+  def get(self):
+    return self._delim.join([self._pid.get(), self._lid.get()])
+   
+  def set(self, value):
+    if(value == None or len(value) == 0):
+      return
+    if not isinstance(value, list):
+      value = value.split(self._delim)
+    if len(value) > 0:
+      self._pid.set(value[0])
+    if len(value) > 1:
+      self._lid.set(value[1])
+
+  def configure(self, **kw):
+    self._uri.configure(**kw)
+    self._pid.configure(**kw)
+    self._lid.configure(**kw)
+
+  def onButtonPressLid(self, *args):
     uri_value = self._uri.get()
+    if not uri_value:
+      return
     pid_value = self._pid.get()
+    if not pid_value:
+      return
+    if pid_value == self._state:
+      return
+    self._state = pid_value
 
-    combo_widget['cursor'] = 'watch'
-
-    values = gis_portal_get_info(uri_value, pid_value, layer, field)
-
-    combo_widget['values'] = values
-
-    combo_widget['cursor'] = ''
-
+    self._lid['cursor'] = 'watch'
+    self._lid['values'] = gis_portal_smartlist(uri_value, pid_value)
+    self._lid['cursor'] = ''
 
 # main frame
 class AppTk(tk.Tk):
@@ -1299,7 +1550,6 @@ def drawLogo(canvas, choice = None):
     canvas.scale("all", 0, 0, 0.1, 0.1)
     return canvas
 
-
 def createIcon(choice = None):
     import tempfile, binascii
     # create temp icon file, will be cleaned by tk.Tk destroy
@@ -1311,6 +1561,181 @@ def createIcon(choice = None):
     return iconfile.name
 
 ### } BRANDING ###
+
+### { GisPortal
+
+class GisPortal(object):
+  '''
+  Helper class to hold a Gis connection
+  '''
+  _gis = None
+  _item = None
+  _layer = None
+  _fid = 'FID'
+  _srs = '3395'
+  def __init__(self, portal_url = None, itemid = None, layerid = None):
+    from arcgis.gis import GIS, Layer
+
+    if portal_url is None:
+      portal_url = portal_url_default
+
+    if itemid is None:
+      return
+
+    self._gis = GIS(portal_url)
+
+    if itemid is not None:
+      if ':' in itemid:
+        itemid, layerid = itemid.split(':')
+    
+      if len(itemid) == 32:
+        self._item = self._gis.content.get(itemid)
+      else:
+        for item in self._gis.content.search(itemid):
+          if item.title == itemid:
+            self._item = item
+            break
+        else:
+          raise Exception("item id %s not found" % itemid)
+
+    self.set_layer(layerid)
+
+  def set_layer(self, layerid):
+    if layerid:
+      # combine all featureservers in a single list
+      fs = self._item.layers + self._item.tables
+      if isinstance(layerid, str) and not layerid.isnumeric():
+        for i in range(len(fs)):
+          if fs[i].properties.name == layerid:
+            layerid = i
+            break
+        else:
+          raise Exception("layer id %s not found" % layerid)
+
+      if isinstance(layerid, str):
+        layerid = int(layerid)
+
+      self._layer = fs[layerid]
+
+  def get_layer_names(self):
+    if self._item:
+      return [_.properties.name for _ in self._item.layers + self._item.tables]
+
+  def get_layer_fields(self):
+    if self._item and self._layer:
+      return [_.name for _ in self._layer.properties.fields]
+
+  def get_unique_values(self, field):
+    if self._item and self._layer:
+      return self._layer.get_unique_values(field)
+
+  def download(self, select = None):
+    """ retrieve the layer as a pandas dataframe """
+    if not self.connected():
+      return
+
+    where = self.parse_select(select)
+    if where is None:
+      where = '1=1'
+
+    if pd.__version__ < '0.20':
+      return self.featureset_to_df(self._layer.query(where))
+
+    return self._layer.query(where, as_df=True)
+
+  def featureset_to_df(self, fs):
+    """ 
+    convert a featureset to a standard DataFrame 
+    not spatial, which requires recent pandas
+    """
+    rs = []
+    for f in fs.value['features']:
+      r = f['attributes']
+      if 'geometry' in f:
+        r.update(f['geometry'])
+      rs.append(r)
+    return pd.DataFrame.from_records(rs)
+
+  def detect_fid(self, df):
+    """ check if the object id in dataframe is either FID or OBJECTID """
+    for k in ['FID', 'OBJECTID']:
+      if k in df:
+        self._fid = k
+        break
+
+  def upload(self, df):
+    """ add or update features to the layer """
+    from arcgis.geometry import Point
+    from arcgis.features import Feature
+
+    if not self.connected():
+      return
+
+    self.detect_fid(df)
+
+    df.fillna('', inplace=True)
+
+    dfd = df.to_dict('records')
+
+    fs_add = []
+    fs_update = []
+    for row in df.index:
+      # spatialReference=
+      p = None
+      if 'SHAPE' in df:
+        p = eval(df.loc[row, 'SHAPE'])
+      elif 'z' in df:
+        p = df.loc[row, ['x','y','z']].to_dict()
+      elif 'y' in df:
+        p = df.loc[row, ['x','y']].to_dict()
+      
+      f = Feature(p, dfd[row])
+
+      if self._fid in df and df.loc[row, self._fid]:
+        fs_update.append(f)
+      else:
+        fs_add.append(f)
+
+    return self._layer.edit_features(fs_add, fs_update)
+
+  def parse_select(self, select):
+    where = None
+    
+    if select is None:
+      pass
+    elif re.search(r'=[\s\d]*\D+', select):
+      where = "%s='%s'" % tuple(select.split('='))
+    elif re.search(r'[<=>]', select):
+      where = select
+    
+    return where
+
+  def delete(self, df = None, select = None):
+    deletes = None
+    where = self.parse_select(select)
+
+    if df is not None and not df.empty:
+      if self._fid not in df:
+        raise Exception('FID not found in data')
+        return
+
+      if df[self._fid].any():
+        deletes = ','.join(df[self._fid].dropna())
+    
+    elif where is None:
+      return
+
+    return self._layer.delete_features(deletes, where)
+
+  def connected(self):
+    return self._layer is not None
+
+  def dummy(self, arg):
+    """ drop in function for dry runs """
+    print(self._layer)
+    print(arg)
+
+### } GisPortal
 
 # default main for when this script is standalone
 # when this as a library, will redirect to the caller script main()
