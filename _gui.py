@@ -22,7 +22,6 @@ https://github.com/pemn/usage-gui
 '''
 
 ### UTIL { ###
-portal_url_default = "https://portalgisvale.maps.arcgis.com"
 
 import sys, os, os.path, time
 # import modules from a pyz (zip) file with same name as scripts
@@ -30,12 +29,16 @@ import sys, os, os.path, time
 sys.path.insert(0, os.path.splitext(sys.argv[0])[0] + '.pyz')
 import numpy as np
 import pandas as pd
+from PIL import Image, ImageDraw
 
 # fix for wrong path of pythoncomXX.dll in vulcan 10.1.5
 if 'VULCAN_EXE' in os.environ:
   os.environ['PATH'] += ';' + os.environ['VULCAN_EXE'] + "/Lib/site-packages/pywin32_system32"
 
 def pyd_zip_extract():
+  pyz_path = os.path.splitext(sys.argv[0])[0] + '.pyz'
+  if not os.path.exists(pyz_path):
+    return
   from zipfile import ZipFile
   pyz = ZipFile(os.path.splitext(sys.argv[0])[0] + '.pyz')
   # extract any pyd library to current folder since they are not supported by zipimport
@@ -70,11 +73,14 @@ def usage_gui(usage = None):
   else:
     AppTk(usage).mainloop()
 
-def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, keep_null = False):
+def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, keep_null = False):
   '''
-  convenience function to return a dataframe base on the input file extension
+  convenience function to return a dataframe based on the input file extension
   bmf: vulcan block model
+  dgd.isis: vulcan layer
   isis: vulcan database
+  00t: vulcan triangulation
+  csv: ascii table
   csv: ascii table
   xls: excel table
   '''
@@ -86,21 +92,24 @@ def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, 
   if input_path.lower().endswith('csv'):
     df = pd.read_csv(input_path, encoding="latin1")
   elif re.search(r'xls\w?$', input_path, re.IGNORECASE):
-    df = pd_load_excel(input_path, condition, table_name)
+    df = pd_load_excel(input_path, table_name)
   elif input_path.lower().endswith('bmf'):
-    df = pd_load_bmf(input_path, condition)
+    df = pd_load_bmf(input_path, condition, vl)
+    condition = ''
   elif input_path.lower().endswith('dgd.isis'):
     df = pd_load_dgd(input_path, table_name)
   elif input_path.lower().endswith('isis'):
-    df = pd_load_isisdb(input_path, condition, table_name)
+    df = pd_load_isisdb(input_path, table_name)
   elif input_path.lower().endswith('00t'):
     df = pd_load_tri(input_path)
   elif input_path.lower().endswith('dm'):
-    df = pd_load_dm(input_path, condition)
+    df = pd_load_dm(input_path)
+  elif input_path.lower().endswith('shp'):
+    df = pd_load_shape(input_path)
   else:
     df = pd.DataFrame()
 
-  if len(condition) > 0:
+  if len(condition):
     df.query(condition, True)
 
   # replace -99 with NaN, meaning they will not be included in the stats
@@ -112,24 +121,23 @@ def pd_load_dataframe(input_path, condition = "", table_name = None, vl = None, 
 # temporary backward compatibility
 pd_get_dataframe = pd_load_dataframe
 
-def pd_save_dataframe(df, output_path):
-  # screen
-  if(df.size > 0):
-    # Excel sheet
-    real_index = not df.index.dtype_str.startswith('int')
-    if output_path.lower().endswith('.xlsx'):
-      df.to_excel(output_path, index=real_index)
+def pd_save_dataframe(df, output_path, sheet_name='Sheet1'):
+  ''' save a dataframe to one of the supported formats '''
+  if df.size:
+    if not df.index.dtype_str.startswith('int'):
+      df.reset_index(inplace=True)
+    while isinstance(df.columns, pd.MultiIndex):
+      df.columns = df.columns.droplevel(1)
+    if isinstance(output_path, pd.ExcelWriter) or output_path.lower().endswith('.xlsx'):
+      df.to_excel(output_path, index=False, sheet_name=sheet_name)
+    elif output_path.lower().endswith('.shp'):
+      pd_save_shape(df, output_path)
     elif output_path.lower().endswith('.dgd.isis'):
       pd_save_dgd(df, output_path)
     elif output_path.lower().endswith('.00t'):
       pd_save_tri(df, output_path)
-    elif len(output_path) > 0:
-      # if index is not a automatic integer index, convert to real columns
-      # if not df.index.dtype_str.startswith('int'):
-      #   df.reset_index(inplace=True)
-      # if isinstance(df.columns, pd.MultiIndex):
-      #   df.columns = df.columns.droplevel(1)
-      df.to_csv(output_path, index=real_index)
+    elif len(output_path):
+      df.to_csv(output_path, index=False)
     else:
       print(df.to_string())
   else:
@@ -393,6 +401,7 @@ class commalist(list):
   def split(self, *args):
     return [",".join(_) for _ in self]
 
+
 def dgd_list_layers(file_path):
   import vulcan
   r = []
@@ -412,12 +421,13 @@ def bmf_field_list(file_path):
   bm.close()
   return r
 
-def pd_load_bmf(input_path, condition = ''):
+def pd_load_bmf(input_path, condition = '', vl = None):
   import vulcan
   bm = vulcan.block_model(input_path)
   # get a DataFrame with block model data
   if vl is not None:
     vl = filter(bm.is_field, vl)
+
   return bm.get_pandas(vl, bm_sanitize_condition(condition))
 
 # Vulcan ISIS database
@@ -429,7 +439,7 @@ def isisdb_field_list(file_path):
   db.close()
   return r
 
-def pd_load_isisdb(input_path, condition = '', table_name = None):
+def pd_load_isisdb(input_path, table_name = None):
     if os.path.exists(input_path + '_lock'):
       raise Exception('Input database locked')
     import vulcan
@@ -448,11 +458,7 @@ def pd_load_isisdb(input_path, condition = '', table_name = None):
     key = db.synonym('GEO','HOLEID')
     if not key:
       key = 'KEY'
-    df = pd.DataFrame(fdata, None, [key] + field_list)
-    # df.to_csv('df.csv')
-    if len(condition) > 0:
-      df.query(condition, True)
-    return df
+    return pd.DataFrame(fdata, None, [key] + field_list)
 
 def pd_load_dgd(input_path, layer_dgd = None):
   ''' create a dataframe with object points and attributes '''
@@ -502,31 +508,33 @@ def pd_save_dgd(df, output_path):
   
   c = []
   n = None
-  for row in df.index:
-    layer_name = df.loc[row, 'layer']
+  for row in df.index[::-1]:
+    layer_name = '0'
+    if 'layer' in df:
+      layer_name = df.loc[row, 'layer']
     if layer_name not in layer_cache:
       layer_cache[layer_name] = vulcan.layer(layer_name)
     
     n = df.loc[row, 'n']
     # last row special case
-    if row == df.index[-1]:
-      c.append(row)
-      n = 0
+    c.insert(0, row)
 
-    if n == 0 and len(c):
+    if n == 0:
       points = df.take(c).take(range(5), 1).values.tolist()
       obj = vulcan.polyline(points)
+      if 'closed' in df:
+        obj.set_closed(bool(df.loc[row, 'closed']))
       for i in range(len(obj_attr)):
-        v = str(df.loc[c[0], obj_attr[i]])
-        if i == 0:
-          v = float(df.loc[c[0], obj_attr[i]])
+        if obj_attr[i] in df:
+          v = str(df.loc[row, obj_attr[i]])
+          if i == 0:
+            v = float(df.loc[row, obj_attr[i]])
 
-        setattr(obj, obj_attr[i], v)
+          setattr(obj, obj_attr[i], v)
 
       layer_cache[layer_name].append(obj)
       c.clear()
 
-    c.append(row)
 
   for v in layer_cache.values():
     dgd.save_layer(v)
@@ -541,21 +549,24 @@ def pd_load_tri(input_path):
     cv = np.sum(np.multiply(tri.get_rgb(), [2**16,2**8,1]))
     cn = 'rgb'
 
-  return pd.DataFrame([tri.node[int(v)] + [v,cv] for f in tri.get_faces() for v in f], columns=['x','y','z','node',cn])
+  return pd.DataFrame([tri.get_node(int(f[n])) + [0,bool(n),n,1,f[n],cv] for f in tri.get_faces() for n in range(3)], columns=smartfilelist.default_columns + ['closed','node',cn])
 
 def pd_save_tri(df, output_path):
-  node_name = df.columns[3]
   import vulcan
+  node_name = df.columns[4]
+  
+  if os.path.exists(output_path):
+    os.remove(output_path)
+
   tri = vulcan.triangulation("", "w")
-  # the fifth column is color
-  if len(df.columns) >= 5:
-    if 'rgb' in df:
-      rgb = np.floor(np.divide(np.mod(np.repeat(df.iloc[0, 4],3), [2**32, 2**16, 2**8]), [2**16,2**8,1]))
-      print('color r %d g %d b %d' % tuple(rgb))
-      tri.set_rgb(rgb.tolist())
-    else:
-      print('color index ', df.iloc[0, 4])
-      tri.set_colour(int(df.iloc[0, 4]))
+
+  if 'rgb' in df:
+    rgb = np.floor(np.divide(np.mod(np.repeat(df.loc[0, 'rgb'],3), [2**32, 2**16, 2**8]), [2**16,2**8,1]))
+    print('color r %d g %d b %d' % tuple(rgb))
+    tri.set_rgb(rgb.tolist())
+  elif 'colour' in df:
+    print('colour index ', df.loc[0, 'colour'])
+    tri.set_colour(int(df.loc[0, 'colour']))
 
   node_list = []
   
@@ -587,10 +598,7 @@ def pd_load_dm(input_path, condition = ''):
     fdata.append([dm.GetColumn(j) for j in range(1, n)])
     dm.GetNextRow()
   
-  df = pd.DataFrame(fdata, None, [dm.Schema.GetFieldName(j) for j in range(1, n)])
-  if len(condition) > 0:
-    df.query(condition, True)
-  return df
+  return pd.DataFrame(fdata, None, [dm.Schema.GetFieldName(j) for j in range(1, n)])
 
 def dm_field_list(file_path):
   import win32com.client
@@ -601,7 +609,12 @@ def dm_field_list(file_path):
 
 # Microsoft Excel compatibles
 
-def pd_load_excel(input_path, condition = '', table_name = None):
+def excel_list_sheets(input_path):
+  import openpyxl
+  wb = openpyxl.load_workbook(input_path)
+  return wb.sheetnames
+
+def pd_load_excel(input_path, table_name = None):
   df = None
   if pd.__version__ < '0.20':
     import openpyxl
@@ -619,29 +632,80 @@ def pd_load_excel(input_path, condition = '', table_name = None):
 
 # ESRI shape
 
+def pd_load_shape(file_path):
+  import shapefile
+
+  shapes = shapefile.Reader(file_path)
+
+  df = pd.DataFrame(None, columns=smartfilelist.default_columns + ['record','part','type','layer'])
+
+  item_n = 0
+  row = 0
+  for item in shapes.shapeRecords():
+    # object without a valid layer name will have this default layer
+    fields = item.record.as_dict()
+
+    p1 = len(item.shape.points)
+    # each object may have multiple parts
+    # create a object for each of these parts
+    part_n = len(item.shape.parts)
+    for p in reversed(item.shape.parts):
+      part_n -= 1
+      for n in range(p,p1):
+        for c in range(len(item.shape.points[n])):
+          df.loc[row, df.columns[c]] = item.shape.points[n][c]
+        for k,v in fields.items():
+          df.loc[row, k] = v
+
+        df.loc[row, 'type'] = item.shape.shapeTypeName
+        df.loc[row, 'record'] = item_n
+        df.loc[row, 'part'] = part_n
+        df.loc[row, 'n'] = n
+        df.loc[row, 'w'] = 0
+        df.loc[row, 't'] = n != p
+        row += 1
+
+      p1 = p
+    item_n += 1
+
+  return df
+
+
+def pd_save_shape(df, output_path):
+  import shapefile
+
+  shpw = shapefile.Writer(os.path.splitext(output_path)[0])
+
+  for i in range(5, df.shape[1]):
+    shpw.field(df.columns[i], 'C' if df.dtypes[i] == 'object' else 'N')
+
+  p = []
+  n = None
+  for row in df.index:
+    n = df.loc[row, 'n']
+    # last row special case
+    p.insert(0, n)
+
+    if n == 0:
+      points = df.take(p).take(range(5), 1).values.tolist()
+      shpw.polyz([points])
+      # shpw.record(*[df.iloc[row, c] for c in range(6, df.shape[1])])
+      shpw.record(*[df.iloc[row, c] for c in range(5, df.shape[1])])
+      p.clear()
+  
+  shpw.close()
+
 def shape_field_list(file_path):
   import shapefile
   shapes = shapefile.Reader(file_path)
   return [shapes.fields[i][0] for i in range(1, len(shapes.fields))]
-
-# ESRI ArcGis Online
-
-def gis_portal_smartlist(portal_url, itemid, layerid = None, field = None):
-  gp = GisPortal(portal_url, itemid, layerid)
-  
-  if not gp.connected():
-    return gp.get_layer_names()
-  
-  if field is None:
-    return gp.get_layer_fields()
-
-  return gp.get_unique_values(field)
 
 class smartfilelist(object):
   '''
   detects file type and return a list of relevant options
   searches are cached, so subsequent searcher for the same file path are instant
   '''
+  default_columns = ['x','y','z','w','t','n']
   # global value cache, using path as key
   _cache = {}
   @staticmethod
@@ -673,7 +737,7 @@ class smartfilelist(object):
         # vulcan block model
         smartfilelist._cache[input_path] = bmf_field_list(input_path)
       elif(input_path.lower().endswith(".00t")):
-        smartfilelist._cache[input_path] = ['x','y','z','node','index','rgb']
+        smartfilelist._cache[input_path] = smartfilelist.default_columns + ['closed','node','rgb','colour']
       elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
         # list columns of files handled by pd_get_dataframe
         smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path, "", table_name).columns)
@@ -682,6 +746,8 @@ class smartfilelist(object):
       elif(input_path.lower().endswith(".shp")):
         # ESRI shape file
         smartfilelist._cache[input_path] = shape_field_list(input_path)
+      elif(input_path.lower().endswith(".dxf")):
+        smartfilelist._cache[input_path] = smartfilelist.default_columns + ['layer']
 
     return smartfilelist._cache[input_path]
 
@@ -728,13 +794,15 @@ class ScriptFrame(ttk.Frame):
         c = LabelCombo(self, token.name, token.data)
       elif token.type == ':':
         if token.data == 'portal':
-          c = ArcGisField(self, token.name, token.data)
+          import gisportal
+          c = gisportal.ArcGisField(self, token.name, token.data)
         else:
           c = ComboPicker(self, token.name, token.data)
       elif token.type == '#':
         c = tkTable(self, token.name, token.data.split('#'))
       elif token.type == '~':
-        c = ArcGisPortal(self, token.name, portal_url_default, token.data)
+        import gisportal
+        c = gisportal.ArcGisPortal(self, token.name, token.data)
       elif token.type == '%':
         c = LabelRadio(self, token.name, token.data)
       elif token.name:
@@ -1007,10 +1075,9 @@ class tkTable(ttk.Labelframe):
       self._label = str(self.winfo_id())
     self._columns = [UsageToken(_) for _ in columns]
     self._cells = []
-    ttk.Button(self, text="➕", width=3, command=self.addRow).grid(row=99, column=0)
     for i in range(len(self._columns)):
-      self.columnconfigure(i+1, weight=1)
-      ttk.Label(self, text=self._columns[i].name).grid(row=0, column=i+1)
+      self.columnconfigure(i, weight=1)
+      ttk.Label(self, text=self._columns[i].name).grid(row=0, column=i)
 
     self.addRow()
     # ttk.Style().configure('style.TFrame', background='green')
@@ -1026,7 +1093,7 @@ class tkTable(ttk.Labelframe):
         value.append([self.get(i, j) for j in range(len(self._columns))])
   
     elif(row < len(self._cells) and col < len(self._columns)):
-      value = self._cells[row][col+1].get()
+      value = self._cells[row][col].get()
     return value
 
   # set the widget values, expanding the table rows as needed
@@ -1044,17 +1111,20 @@ class tkTable(ttk.Labelframe):
       # expand internal array to fit the data
       for i in range(len(self._cells), row+1):
         self.addRow()
-      self._cells[row][col+1].set(data)
+      self._cells[row][col].set(data)
 
   def addRow(self):
     row = len(self._cells)
     self._cells.append([])
     for col in range(len(self._columns)+1):
       child = None
-      if col == 0:
-        child = ttk.Button(self, text="✖", width=3, command=lambda: self.delRow(row))
+      if col == len(self._columns):
+        if row == 0:
+          child = ttk.Button(self, text="➕", width=3, command=self.addRow)
+        else:
+          child = ttk.Button(self, text="✖", width=3, command=lambda: self.delRow(row))
       else:
-        token = self._columns[col-1]
+        token = self._columns[col]
         if(token.type == '@'):
           child = CheckBox(self, "%s_%s" % (token.name,row))
         elif(token.type == '*'):
@@ -1087,166 +1157,19 @@ class tkTable(ttk.Labelframe):
     else:
       super().configure(**kw)
 
-class ArcGisField(ttk.LabelFrame):
-  ''' Retrieves the list from a web service '''
-  # cache the last selected field
-  _field = None
-  _delim = '='
-  _state = None
-  def __init__(self, master, label, source):
-    self._source = source
-    # create a container frame for the combo and label
-    ttk.Labelframe.__init__(self, master, name=label, text=label)
-    self.columnconfigure(1, weight=1)
-
-    ttk.Label(self, text='⎥⎥⎥').grid(row=0, column=0)
-    ttk.Label(self, text='⚡').grid(row=1, column=0)
-    
-    self._col  = ttk.Combobox(self)
-    self._col.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
-    self._val = ttk.Combobox(self)
-    self._val.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
-
-    self._col.bind("<ButtonPress>", self.onButtonPressCol)
-    self._val.bind("<ButtonPress>", self.onButtonPressVal)
-    
-  def get(self):
-    value = [self._col.get(), self._val.get()]
-    
-    if value[0] and value[1]:
-      return self._delim.join(value)
-    
-    return value[0]
-   
-  def set(self, value):
-    if(value == None or len(value) == 0):
-      return
-    if not isinstance(value, list):
-      value = value.split(self._delim)
-    if len(value) > 0:
-      self._col.set(value[0])
-    if len(value) > 1:
-      self._val.set(value[1])
-
-  def configure(self, **kw):
-    self._col.configure(**kw)
-    self._val.configure(**kw)
-
-  def onButtonPressCol(self, *args):
-    if not self._source:
-      return
-
-    source_widget = self.master.nametowidget(self._source)
-    
-    if not source_widget:
-      return
-
-    portal = source_widget.get()
-
-    if portal == self._state:
-      return
-    self._state = portal
-
-    self._col['cursor'] = 'watch'
-    self._col['values'] = gis_portal_smartlist(None, portal)
-    self._col['cursor'] = ''
-
-  def onButtonPressVal(self, *args):
-    if not self._source:
-      return
-
-    if not self._col.get():
-      return
-
-    source_widget = self.master.nametowidget(self._source)
-    
-    if not source_widget:
-      return
-
-    col = self._col.get()
-    if not col or col == self._state:
-      return
-    self._state = col
-
-    portal = source_widget.get()
-
-    self._val['cursor'] = 'watch'
-    self._val['values'] = gis_portal_smartlist(None, portal, None, col)
-    self._val['cursor'] = ''
-
-class ArcGisPortal(ttk.LabelFrame):
-  ''' Retrieves the list from a web service '''
-  # cache the last selected field
-  _field = None
-  _delim = ':'
-  _state = None
-  def __init__(self, master, label, uri_value = None, pid_value = None):
-    # create a container frame for the combo and label
-    ttk.Labelframe.__init__(self, master, name=label, text=label)
-    self.columnconfigure(1, weight=1)
-
-    ttk.Label(self, text='⛅').grid(row=0, column=0)
-    ttk.Label(self, text='✨').grid(row=1, column=0)
-    ttk.Label(self, text='⧉').grid(row=2, column=0)
-    
-    self._uri = ttk.Entry(self)
-    self._uri.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
-    self._pid = ttk.Combobox(self)
-    self._pid.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
-    self._lid  = ttk.Combobox(self)
-    self._lid.grid( sticky=tk.W + tk.E, padx=4, pady=2, row=2, column=1)
-
-    self._lid.bind("<ButtonPress>", self.onButtonPressLid)
-
-    if uri_value:
-      self._uri.insert(0, uri_value)    
-    if pid_value:
-      self._pid.set(pid_value)
-
-  def get(self):
-    return self._delim.join([self._pid.get(), self._lid.get()])
-   
-  def set(self, value):
-    if(value == None or len(value) == 0):
-      return
-    if not isinstance(value, list):
-      value = value.split(self._delim)
-    if len(value) > 0:
-      self._pid.set(value[0])
-    if len(value) > 1:
-      self._lid.set(value[1])
-
-  def configure(self, **kw):
-    self._uri.configure(**kw)
-    self._pid.configure(**kw)
-    self._lid.configure(**kw)
-
-  def onButtonPressLid(self, *args):
-    uri_value = self._uri.get()
-    if not uri_value:
-      return
-    pid_value = self._pid.get()
-    if not pid_value:
-      return
-    if pid_value == self._state:
-      return
-    self._state = pid_value
-
-    self._lid['cursor'] = 'watch'
-    self._lid['values'] = gis_portal_smartlist(uri_value, pid_value)
-    self._lid['cursor'] = ''
-
 # main frame
 class AppTk(tk.Tk):
   '''TK-Based Data driven GUI application'''
-  _iconfile_name = None
+  _iconfile = None
+  _logofile = None
   def __init__(self, usage, client=sys.argv[0]):
     ClientScript.init(client)
     root = tk.Tk.__init__(self)
     self.title(ClientScript._base)
     
-    self._iconfile_name = createIcon(os.environ['USERDOMAIN'])
-    self.iconbitmap(default=self._iconfile_name)
+    self._iconfile = Branding().name
+    self._logofile = Branding('png', (100,100))
+    self.iconbitmap(default=self._iconfile)
 
     self.columnconfigure(0, weight=1)
 
@@ -1264,8 +1187,11 @@ class AppTk(tk.Tk):
 
     ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
     
-    # if we dont store the image in a variable, it will be garbage colected before being displayed
-    drawLogo(tk.Canvas(self), os.environ['USERDOMAIN']).pack(side=tk.TOP, anchor="ne")
+    self.logo = tk.Canvas(self, width=self._logofile.image.size[0], height=self._logofile.image.size[1])
+    
+    self.logo.create_image(0, 0, anchor='nw', image=self._logofile.photoimage)
+    self.logo.pack(side=tk.TOP, anchor="ne")
+
     self.button = ttk.Button(self, text="Run", command=self.runScript)
     self.button.pack(side=tk.LEFT)
     
@@ -1342,400 +1268,75 @@ class AppTk(tk.Tk):
   
   def destroy(self):
     Settings().save(self.script.get(True))
-    os.remove(self._iconfile_name)
+    os.remove(self._iconfile)
     tk.Tk.destroy(self)
 
 ### } GUI ###
 
 ### BRANDING { ###
 
-iconhexdata = dict()
-
-iconhexdata['VALENET'] = \
-'0000010001002020000001002000a8100000160000002800000020000000' \
-'400000000100200000000000000000000000000000000000000000000000' \
-'0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00848f005b83920023ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00828e002d838f00f6838f00cd92920007ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff008b8b000b829000d7838f00ff838f00ff8490' \
-'0095ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00838e00a3838f00ff838f' \
-'00ff838f00ff838f00ff828e0056ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00828f0062838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00f1808e0024ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff008591' \
-'002c838f00f6838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00cf92920007ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff008b8b000b838f00d6838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff84900097ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00838f00a1838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff828e0058ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00838e0061838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00f2868d0026ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00828e002b838f00f5838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00d080800008ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff008099000a838f00d6' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838e009a' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'838f00a0838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff828e005affffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00828f0060838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00f383900027ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff008692002a838f00f5838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00d28e8e0009ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff008099000a828e00d5838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'01fe838f00ff838f00ff838e009cffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00848f009f838f00ff838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff629746d032a3' \
-'aac016aae3de14abeaf817aae2de22a7caca5e984bd08290005cffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00848e005f838f' \
-'00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff7b9110f021a8' \
-'ccc713abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-'1da9d5c75c964e27ffffff00ffffff00ffffff00ffffff00ffffff008692' \
-'002a838f00f5838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff6796' \
-'3bd515aae6e213abeaff13abeaff13abeaff13abeaff13abeaff13abeaff' \
-'13abeaff13abeaff13abeaff14abe9cf1ab3e60affffff00ffffff00ffff' \
-'ff008099000a838f00d4838f00ff838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff848f00991ca7d53713acea8713acead913abeaff13abeaff13abeaff' \
-'13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13aceba2ffff' \
-'ff00ffffff00ffffff008390009e838f00ff838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00fa828e0068ffffff00ffffff00ffffff00ffffff0014aaeb33' \
-'13abeabf13abeaff13abeaff13abeaff13abeaff13abeaff13abeaff13ab' \
-'eaff13abeaff14aaeb66ffffff008290005e838f00ff838f00ff838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00e88491003cffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff0013aae95112abeadd13abeaff13abeaff13ab' \
-'eaff13abeaff13abeaff13abeaff13abeaf715acea31838e00a3838f00ff' \
-'838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00cb8092001cffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff0000aaff0614ab' \
-'eb7313abeaef13abeaff13abeaff13abeaff13abeaff13abeaff13aaebbb' \
-'ffffff00848f005b828f00d9838f00ff838f00ff838f00ff838f00ff838f' \
-'00ff838f00ff838f00ff838f00e0838e0061aaaa0003ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff000eaaf11214aaeb5a13abeb9713abebc812abe99a' \
-'14abeb581caae309ffffff00ffffff00ffffff00828e003d838f0080838f' \
-'00a1838f00c2838e00b3838f00848490005380800006ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffffffffffffffffffffff' \
-'fffffffffffffffffffe7ffffffc3ffffff83ffffff81ffffff00fffffe0' \
-'07ffffc007ffffc003ffff8001ffff0000fffe0000fffe00007ffc00003f' \
-'f800001ff000001ff000000fe0000007c00040038001f8038003fe010007' \
-'ff80c01fffe3f07fffffffffffffffffffffffffffffffffffff'
-
-iconhexdata['default'] = \
-'000001000100101000000100200068040000160000002800000010000000' \
-'20000000010020000000000000040000120b0000120b0000000000000000' \
-'0000ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffffff00ffffff0001010100000000000000004c000000ba' \
-'000000750000000000000000000000000000000000000075000000ba0000' \
-'004c0000000001010100ffffff00ffffff00010101000000004b0f1a0dc8' \
-'64b754fd0f1b0dc5000000230000000000000000000000230f1d0dc563c4' \
-'52fd0e1c0cc80000004b01010100ffffff00ffffff00010101190a1009b6' \
-'58994af35eb04dff3f7035e60000007a00000000000000000000007a3e77' \
-'34e665c754ff56a948f3091008b601010119ffffff00ffffff0001010163' \
-'3b5d33da5ca64bff5aa649ff5ba64afc000000b600000000000000000000' \
-'00b65eb54efc62bf51ff64c253ff34602cda01010163ffffff00ffffff00' \
-'01010194659d57f0579d46ff579f46ff427a36ee0101017e010101000101' \
-'01000101017e47863aee5fb54eff60b94fff58a04af001010194ffffff00' \
-'ffffff00020202a979ba69fc60a44fff579b46ff0b1309bd010101180101' \
-'010001010100010101180c150abd5bab4aff5daf4cff68b657fc020202a9' \
-'ffffff00ffffff00020202a37fc16efc66aa55ff64a853ff0d150bb90101' \
-'01180101010001010100010101180c140ab958a247ff59a548ff6cb45bfc' \
-'020202a3ffffff00ffffff000303038579b26bec6aae59ff69ad58ff3456' \
-'2cd2010101760101011701010117010101762b4d23d2569c45ff5aa149ff' \
-'6aa45bec03030385ffffff00ffffff00030303544d6f45c980c46fff70b4' \
-'5fff6cad5cfb395b31d10f170db40f170db4395b31d16cad5cfb70b45fff' \
-'7cc06bff496a40c903030354ffffff00ffffff000303031410160f9281bc' \
-'72eb82c671ff79bd68ff79bd68ff79bd68ff79bd68ff79bd68ff79bd68ff' \
-'80c46fff7eb86feb10160e9203030314ffffff00ffffff00030303000404' \
-'04381b25189c84bf75eb8fd37eff86ca75ff82c671ff82c671ff86ca75ff' \
-'8ed27dff82bd73eb1b25189c0404043803030300ffffff00ffffff000303' \
-'030004040400040404361218108a507248c084be75e794d784fa94d784fa' \
-'83bd74e7507247c01218108a040404360404040003030300ffffff00ffff' \
-'ff00030303000404040004040400040404120404044a0404047104040485' \
-'04040485040404710404044a04040412040404000404040003030300ffff' \
-'ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00' \
-'ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff' \
-'ff00ffffff00ffff0000ffff0000e3c70000c18300008181000081810000' \
-'818100008181000081810000800100008001000080010000c0030000e007' \
-'0000f00f0000ffff0000'
-
-def drawLogo(canvas, choice = None):
-    '''draw a custom logo that will fit the ne corner of our app'''
-    if choice == 'VALENET':
-        canvas.create_polygon(875,242, 875,242, 974,112, 974,112, 863,75, 752,112, 752,112, 500,220, 386,220, 484,757, fill="#eaab13", smooth="true")
-        canvas.create_polygon(10,120, 10,120, 218,45, 554,242, 708,312, 875,242, 875,242, 484,757, 484,757, fill="#008f83", smooth="true")
+class Branding(object):
+  _gc = []
+  def __init__(self, f='ICO', size=None, choice=None):
+    if choice is None:
+      self._choice = os.environ['USERDOMAIN']
     else:
-        canvas.create_arc(50, 50, 950, 950, outline='', fill="#3fa648", start=290, extent=320)
-        canvas.create_oval(360, 360, 640, 640, outline='', fill=canvas["background"])
-    canvas['height'] = 100
-    canvas['width'] = 100
-    canvas.scale("all", 0, 0, 0.1, 0.1)
-    return canvas
+      self._choice = choice
 
-def createIcon(choice = None):
-    import tempfile, binascii
-    # create temp icon file, will be cleaned by tk.Tk destroy
-    iconfile = tempfile.NamedTemporaryFile(delete=False)
-    if choice not in iconhexdata:
-        choice = 'default'
+    self._format = f
+    
+    self._image = Image.new('RGBA', (800, 800))
+    draw = ImageDraw.Draw(self._image)
 
-    iconfile.write(binascii.a2b_hex(iconhexdata[choice]))
-    return iconfile.name
+    if self._choice=='VALENET':
+      # Vale logo
+      draw.polygon((430, 249, 397,698, 803,160,  766,139, 745,132, 727,130, 692,130, 655,142, 618,160, 571,188, 524,216, 477,236), "#eaab13")
+      draw.chord((-80,105, 413,588), 228, 312, "#008f83")
+      draw.polygon((0,165, 397,698, 720,270, 454,270, 454,270, 429,248, 328,165), "#008f83")
+      draw.chord((403,-40, 770,327), 44, 136, "#eaab13")
+    else:
+      # open souce logo
+      draw.pieslice([40, 40, 760, 760], 110, 70, '#3fa648')
+      draw.ellipse([288, 288, 512, 512], Image.ANTIALIAS)
+
+    del draw
+    if size:
+      self._image = self._image.resize(size)
+
+  @property
+  def file(self):
+    import tempfile
+    self._file = tempfile.NamedTemporaryFile(delete=False)
+    self._image.save(self._file, self._format)
+    return self._file
+
+  @property
+  def name(self):
+    return self.file.name
+
+  @property
+  def image(self):
+    return(self._image)
+  
+  @property
+  def format(self):
+    return(self._format)
+
+  @property
+  def data(self):
+    import base64
+    from io import BytesIO
+    buffered = BytesIO()
+    self._image.save(buffered, format=self._format)
+    return base64.b64encode(buffered.getvalue())
+
+  @property
+  def photoimage(self):
+    # if we dont store the image in a property, it will be garbage colected before being displayed
+    self._pi = tk.PhotoImage(data=self.data)
+    return self._pi
 
 ### } BRANDING ###
-
-### { GisPortal
-
-class GisPortal(object):
-  '''
-  Helper class to hold a Gis connection
-  '''
-  _gis = None
-  _item = None
-  _layer = None
-  _fid = 'FID'
-  _srs = '3395'
-  def __init__(self, portal_url = None, itemid = None, layerid = None):
-    from arcgis.gis import GIS, Layer
-
-    if portal_url is None:
-      portal_url = portal_url_default
-
-    if itemid is None:
-      return
-
-    self._gis = GIS(portal_url)
-
-    if itemid is not None:
-      if ':' in itemid:
-        itemid, layerid = itemid.split(':')
-    
-      if len(itemid) == 32:
-        self._item = self._gis.content.get(itemid)
-      else:
-        for item in self._gis.content.search(itemid):
-          if item.title == itemid:
-            self._item = item
-            break
-        else:
-          raise Exception("item id %s not found" % itemid)
-
-    self.set_layer(layerid)
-
-  def set_layer(self, layerid):
-    if layerid:
-      # combine all featureservers in a single list
-      fs = self._item.layers + self._item.tables
-      if isinstance(layerid, str) and not layerid.isnumeric():
-        for i in range(len(fs)):
-          if fs[i].properties.name == layerid:
-            layerid = i
-            break
-        else:
-          raise Exception("layer id %s not found" % layerid)
-
-      if isinstance(layerid, str):
-        layerid = int(layerid)
-
-      self._layer = fs[layerid]
-
-  def get_layer_names(self):
-    if self._item:
-      return [_.properties.name for _ in self._item.layers + self._item.tables]
-
-  def get_layer_fields(self):
-    if self._item and self._layer:
-      return [_.name for _ in self._layer.properties.fields]
-
-  def get_unique_values(self, field):
-    if self._item and self._layer:
-      return self._layer.get_unique_values(field)
-
-  def download(self, select = None):
-    """ retrieve the layer as a pandas dataframe """
-    if not self.connected():
-      return
-
-    where = self.parse_select(select)
-    if where is None:
-      where = '1=1'
-
-    if pd.__version__ < '0.20':
-      return self.featureset_to_df(self._layer.query(where))
-
-    return self._layer.query(where, as_df=True)
-
-  def featureset_to_df(self, fs):
-    """ 
-    convert a featureset to a standard DataFrame 
-    not spatial, which requires recent pandas
-    """
-    rs = []
-    for f in fs.value['features']:
-      r = f['attributes']
-      if 'geometry' in f:
-        r.update(f['geometry'])
-      rs.append(r)
-    return pd.DataFrame.from_records(rs)
-
-  def detect_fid(self, df):
-    """ check if the object id in dataframe is either FID or OBJECTID """
-    for k in ['FID', 'OBJECTID']:
-      if k in df:
-        self._fid = k
-        break
-
-  def upload(self, df):
-    """ add or update features to the layer """
-    from arcgis.geometry import Point
-    from arcgis.features import Feature
-
-    if not self.connected():
-      return
-
-    self.detect_fid(df)
-
-    df.fillna('', inplace=True)
-
-    dfd = df.to_dict('records')
-
-    fs_add = []
-    fs_update = []
-    for row in df.index:
-      # spatialReference=
-      p = None
-      if 'SHAPE' in df:
-        p = eval(df.loc[row, 'SHAPE'])
-      elif 'z' in df:
-        p = df.loc[row, ['x','y','z']].to_dict()
-      elif 'y' in df:
-        p = df.loc[row, ['x','y']].to_dict()
-      
-      f = Feature(p, dfd[row])
-
-      if self._fid in df and df.loc[row, self._fid]:
-        fs_update.append(f)
-      else:
-        fs_add.append(f)
-
-    return self._layer.edit_features(fs_add, fs_update)
-
-  def parse_select(self, select):
-    where = None
-    
-    if select is None:
-      pass
-    elif re.search(r'=[\s\d]*\D+', select):
-      where = "%s='%s'" % tuple(select.split('='))
-    elif re.search(r'[<=>]', select):
-      where = select
-    
-    return where
-
-  def delete(self, df = None, select = None):
-    deletes = None
-    where = self.parse_select(select)
-
-    if df is not None and not df.empty:
-      if self._fid not in df:
-        raise Exception('FID not found in data')
-        return
-
-      if df[self._fid].any():
-        deletes = ','.join(df[self._fid].dropna())
-    
-    elif where is None:
-      return
-
-    return self._layer.delete_features(deletes, where)
-
-  def connected(self):
-    return self._layer is not None
-
-  def dummy(self, arg):
-    """ drop in function for dry runs """
-    print(self._layer)
-    print(arg)
-
-### } GisPortal
 
 # default main for when this script is standalone
 # when this as a library, will redirect to the caller script main()
@@ -1745,11 +1346,11 @@ def main(*args):
     # redirect to caller script main
     main(*args)
     return
-  # run standalone main code
-  print(__name__)
-  print(args)
-  messagebox.showinfo(message='Business Logic placeholder')
 
 # special entry point for cmd
-if __name__ == '__main__' and sys.argv[0].endswith('_gui.py') and len(sys.argv) == 2:
+if __name__ == '__main__' and sys.argv[0].endswith('_gui.py') and len(sys.argv) == 1:
+  pass
+elif __name__ == '__main__' and len(sys.argv) == 2:
   AppTk(None, sys.argv[1]).mainloop()
+elif __name__ == '__main__' and sys.argv[0].endswith('_gui.py'):
+  main(sys.argv)
