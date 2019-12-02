@@ -35,27 +35,37 @@ from PIL import Image, ImageDraw
 if 'VULCAN_EXE' in os.environ:
   os.environ['PATH'] += ';' + os.environ['VULCAN_EXE'] + "/Lib/site-packages/pywin32_system32"
 
-def pyd_zip_extract():
+def pyd_zip_extract(pyd_path = None):
   pyz_path = os.path.splitext(sys.argv[0])[0] + '.pyz'
   if not os.path.exists(pyz_path):
     return
   from zipfile import ZipFile
-  pyz = ZipFile(os.path.splitext(sys.argv[0])[0] + '.pyz')
+  pyz = ZipFile(pyz_path)
   # extract any pyd library to current folder since they are not supported by zipimport
   # also, extract modules which for other reasons do no work inside a zip
   platform_arch = '.cp%s%s-win_amd64' % tuple(sys.version.split('.')[:2])
+
+  if pyd_path is None:
+    pyd_path = os.environ['TEMP'] + "/pyz"
+  
+  if not os.path.isdir(pyd_path):
+    os.mkdir(pyd_path)
+
+  sys.path.append(pyd_path)
+  os.environ['PATH'] += ';' + pyd_path
+
   for name in pyz.namelist():
     if re.match('[^/]+' + platform_arch + r'\.(pyd|zip)$', name, re.IGNORECASE):
       if name.endswith('zip'):
         # workaround for some weird bug in python 3.5
         if sys.hexversion < 0x3070000:
           pyz.extract(name)
-          ZipFile(name).extractall()
+          ZipFile(name).extractall(pyd_path)
           os.remove(name)
         else:
-          ZipFile(pyz.open(name)).extractall()
+          ZipFile(pyz.open(name)).extractall(pyd_path)
       elif not os.path.exists(name):
-        pyz.extract(name)
+        pyz.extract(name, pyd_path)
 
 def usage_gui(usage = None):
   '''
@@ -76,13 +86,14 @@ def usage_gui(usage = None):
 def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, keep_null = False):
   '''
   convenience function to return a dataframe based on the input file extension
+  csv: ascii tabular data
+  xls: excel workbook
   bmf: vulcan block model
-  dgd.isis: vulcan layer
-  isis: vulcan database
+  dgd.isis: vulcan design object layer
+  isis: vulcan generic database
   00t: vulcan triangulation
-  csv: ascii table
-  csv: ascii table
-  xls: excel table
+  dm: datamine generic database
+  shp: ESRI shape file
   '''
 
   if table_name is None:
@@ -106,6 +117,8 @@ def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, 
     df = pd_load_dm(input_path)
   elif input_path.lower().endswith('shp'):
     df = pd_load_shape(input_path)
+  elif input_path.lower().endswith('msh'):
+    df = pd_load_mesh(input_path)
   else:
     df = pd.DataFrame()
 
@@ -188,7 +201,7 @@ def bm_sanitize_condition(condition):
 
   return condition
 
-# convert field names in the TABLE:FIELD to just FIELD
+# convert field names in the TABLE:FIELD to just FIELD or just TABLE
 def table_field(args, table=False):
   if isinstance(args, list):
     args = [table_field(arg, table) for arg in args]
@@ -431,11 +444,13 @@ def pd_load_bmf(input_path, condition = '', vl = None):
   return bm.get_pandas(vl, bm_sanitize_condition(condition))
 
 # Vulcan ISIS database
-
-def isisdb_field_list(file_path):
+def isisdb_list(file_path, alternate = False):
   import vulcan
   db = vulcan.isisdb(file_path)
-  r = db.field_list(db.table_list()[-1])
+  if alternate:
+    r = db.table_list()
+  else:
+    r = db.field_list(db.table_list()[-1])
   db.close()
   return r
 
@@ -464,7 +479,7 @@ def pd_load_dgd(input_path, layer_dgd = None):
   ''' create a dataframe with object points and attributes '''
   import vulcan
   obj_attr = ['value', 'name', 'group', 'feature', 'description']
-  df = pd.DataFrame(None, columns=['x', 'y', 'z', 'w', 't', 'p', 'n', 'closed', 'layer'] + obj_attr)
+  df = pd.DataFrame(None, columns=['x','y','z','w','t','n','p','closed','layer'] + obj_attr)
 
   dgd = vulcan.dgd(input_path)
 
@@ -553,7 +568,7 @@ def pd_load_tri(input_path):
 
 def pd_save_tri(df, output_path):
   import vulcan
-  node_name = df.columns[4]
+  node_name = 'node'
   
   if os.path.exists(output_path):
     os.remove(output_path)
@@ -567,6 +582,9 @@ def pd_save_tri(df, output_path):
   elif 'colour' in df:
     print('colour index ', df.loc[0, 'colour'])
     tri.set_colour(int(df.loc[0, 'colour']))
+  else:
+    print('default color')
+    tri.set_colour(1)
 
   node_list = []
   
@@ -609,10 +627,22 @@ def dm_field_list(file_path):
 
 # Microsoft Excel compatibles
 
-def excel_list_sheets(input_path):
+def csv_field_list(input_path):
+  df = pd.read_csv(input_path, encoding="latin1", nrows=1)
+  return list(df.columns)
+
+def excel_field_list(input_path, table_name, alternate = False):
   import openpyxl
   wb = openpyxl.load_workbook(input_path)
-  return wb.sheetnames
+  r = []
+  if alternate:
+    r = wb.sheetnames
+  elif table_name and table_name in wb:
+    r = next(wb[table_name].values)
+  else:
+    r = next(wb.active.values)
+
+  return r
 
 def pd_load_excel(input_path, table_name = None):
   df = None
@@ -700,6 +730,59 @@ def shape_field_list(file_path):
   shapes = shapefile.Reader(file_path)
   return [shapes.fields[i][0] for i in range(1, len(shapes.fields))]
 
+# Leapfrog Mesh
+
+def pd_load_mesh(input_path):
+  import struct
+  file = open(input_path, "rb")
+
+  index = None
+  binary = None
+
+  while True:
+    if binary is None:
+      line = file.readline()
+      if line.startswith(b'[index]'):
+        index = line[7:]
+      elif line.startswith(b'[binary]'):
+        binary = line[8:]
+      elif index is not None:
+        index += line
+    else:
+      line = file.read(0xff)
+      binary += line
+      if len(line) < 0xff:
+        break
+
+    if len(line) == 0:
+      break
+
+  face_type, face_wide, face_size = re.findall(r'Tri (\w+) (\d+) (\d+)', str(index))[0]
+  node_type, node_wide, node_size = re.findall(r'Location (\w+) (\d+) (\d+)', str(index))[0]
+  face_wide = int(face_wide)
+  face_size = int(face_size)
+  node_wide = int(node_wide)
+  node_size = int(node_size)
+
+  face_pack = struct.Struct('i' * face_wide)
+  node_pack = struct.Struct('d' * node_wide)
+  # skip unknown 12 byte header
+  # maybe on some cases it contains rgb color?
+  print("%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x = %.2f %.2f %.2f" % tuple(struct.unpack_from('12B', binary, 0) + struct.unpack_from('3f', binary, 0)))
+  p = 12
+  node_list = list()
+  face_list = list()
+  for i in range(face_size):
+    # print(i, p, face_pack.unpack_from(binary, p))
+    face_list.append(face_pack.unpack_from(binary, p))
+    p += face_pack.size
+  for i in range(node_size):
+    # print(i, p, node_pack.unpack_from(binary, p))
+    node_list.append(node_pack.unpack_from(binary, p))
+    p += node_pack.size
+
+  return pd.DataFrame([node_list[int(f[n])] + (0,bool(n),n,1,f[n]) for f in face_list for n in range(3)], columns=smartfilelist.default_columns + ['closed','node'])
+
 class smartfilelist(object):
   '''
   detects file type and return a list of relevant options
@@ -709,47 +792,51 @@ class smartfilelist(object):
   # global value cache, using path as key
   _cache = {}
   @staticmethod
-  def get(input_path):
+  def get(input_path, alternate = False):
     # special case for multiple files. use first
     if isinstance(input_path, commalist):
       if len(input_path):
         input_path = input_path[0][0]
       else:
         input_path = ""
+    
+    r = []
 
     # if this file is already cached, skip to the end
-    if(input_path in smartfilelist._cache):
-      # do nothing
-      pass
+    if(input_path in smartfilelist._cache and not alternate):
+      r = smartfilelist._cache[input_path]
     else:
-      # default to a empty list
-      smartfilelist._cache[input_path] = []
       input_path, table_name = table_name_selector(input_path)
-      if(not os.path.exists(input_path)):
-        pass
-      elif(input_path.lower().endswith(".dgd.isis")):
-        # list layers of vulcan dgd files
-        smartfilelist._cache[input_path] = dgd_list_layers(input_path)
-      elif(input_path.lower().endswith(".isis")):
-        # vulcan isis database
-        smartfilelist._cache[input_path] = isisdb_field_list(input_path)
-      elif(input_path.lower().endswith(".bmf")):
-        # vulcan block model
-        smartfilelist._cache[input_path] = bmf_field_list(input_path)
-      elif(input_path.lower().endswith(".00t")):
-        smartfilelist._cache[input_path] = smartfilelist.default_columns + ['closed','node','rgb','colour']
-      elif(re.search("csv|xls.?$", input_path, re.IGNORECASE)):
-        # list columns of files handled by pd_get_dataframe
-        smartfilelist._cache[input_path] = list(pd_get_dataframe(input_path, "", table_name).columns)
-      elif(input_path.lower().endswith(".dm")):
-        smartfilelist._cache[input_path] = dm_field_list(input_path)
-      elif(input_path.lower().endswith(".shp")):
-        # ESRI shape file
-        smartfilelist._cache[input_path] = shape_field_list(input_path)
-      elif(input_path.lower().endswith(".dxf")):
-        smartfilelist._cache[input_path] = smartfilelist.default_columns + ['layer']
+      if(os.path.exists(input_path)):
+        if(input_path.lower().endswith(".dgd.isis")):
+          # list layers of vulcan dgd files
+          r = dgd_list_layers(input_path)
+        elif(input_path.lower().endswith(".isis")):
+          # vulcan isis database
+          r = isisdb_list(input_path, alternate)
+        elif(input_path.lower().endswith(".bmf")):
+          # vulcan block model
+          r = bmf_field_list(input_path)
+        elif(input_path.lower().endswith(".00t")):
+          r = smartfilelist.default_columns + ['closed','node','rgb','colour']
+        elif(input_path.lower().endswith(".msh")):
+          r = smartfilelist.default_columns + ['closed','node']
+        elif(input_path.lower().endswith(".csv")):
+          r = csv_field_list(input_path)
+        elif(re.search(r'xls\w?$', input_path, re.IGNORECASE)):
+          r = excel_field_list(input_path, table_name, alternate)
+        elif(input_path.lower().endswith(".dm")):
+          r = dm_field_list(input_path)
+        elif(input_path.lower().endswith(".shp")):
+          # ESRI shape file
+          r = shape_field_list(input_path)
+        elif(input_path.lower().endswith(".dxf")):
+          r = smartfilelist.default_columns + ['layer']
+        # we only allow one cache per file but many controls may use same source
+        if (not alternate):
+          smartfilelist._cache[input_path] = r
 
-    return smartfilelist._cache[input_path]
+    return r
 
 class UsageToken(str):
   '''handles the token format used to creating controls'''
@@ -758,7 +845,7 @@ class UsageToken(str):
   _data = None
   def __init__(self, arg):
     super().__init__()
-    m = re.match(r"(\w*)(\*|@|#|=|:|%|~)(.*)", arg)
+    m = re.match(r"(\w*)(\*|@|#|=|:|%|~|!)(.*)", arg)
     if (m):
       self._name = m.group(1)
       self._type = m.group(2)
@@ -792,19 +879,21 @@ class ScriptFrame(ttk.Frame):
         c = FileEntry(self, token.name, token.data)
       elif token.type == '=':
         c = LabelCombo(self, token.name, token.data)
+      elif token.type == '#':
+        c = tkTable(self, token.name, token.data.split('#'))
+      elif token.type == '%':
+        c = LabelRadio(self, token.name, token.data)
+      elif token.type == '!':
+        c = ComboPicker(self, token.name, token.data, True)
       elif token.type == ':':
         if token.data == 'portal':
           import gisportal
           c = gisportal.ArcGisField(self, token.name, token.data)
         else:
           c = ComboPicker(self, token.name, token.data)
-      elif token.type == '#':
-        c = tkTable(self, token.name, token.data.split('#'))
       elif token.type == '~':
         import gisportal
         c = gisportal.ArcGisPortal(self, token.name, token.data)
-      elif token.type == '%':
-        c = LabelRadio(self, token.name, token.data)
       elif token.name:
         c = LabelEntry(self, token.name)
       else:
@@ -929,8 +1018,15 @@ class CheckBox(ttk.Checkbutton):
     return int(self._variable.get())
     
   def set(self, value):
-    #self.onButtonPress()
     return self._variable.set(value)
+
+# shorten paths when they are subdirectories of the current working dir
+def relative_paths(path):
+    cwd_drive, cwd_tail = os.path.splitdrive(os.getcwd().lower())
+    path_drive, path_tail = os.path.splitdrive(path.lower())
+    if cwd_drive == path_drive and os.path.commonpath([path_tail, cwd_tail]) == cwd_tail:
+      return os.path.relpath(path)
+    return(path)
 
 class LabelCombo(ttk.Frame):
   _label = None
@@ -971,9 +1067,10 @@ class LabelCombo(ttk.Frame):
     self._control.configure(**kw)
 
 class ComboPicker(LabelCombo):
-  def __init__(self, master, label, source):
+  def __init__(self, master, label, source, alternate = False):
     LabelCombo.__init__(self, master, label)
     self._source = source
+    self._alternate = alternate
     self._control.bind("<ButtonPress>", self.onButtonPress)
     
   def onButtonPress(self, *args):
@@ -991,7 +1088,7 @@ class ComboPicker(LabelCombo):
       source_widget = self.master.nametowidget(self._source)
 
     if source_widget:
-      self.setValues(smartfilelist.get(source_widget.get()))
+      self.setValues(smartfilelist.get(source_widget.get(), self._alternate))
     else:
       self.setValues([self._source])
 
@@ -1010,7 +1107,6 @@ class FileEntry(ttk.Frame):
     if isinstance(master, tkTable):
       self._control = ttk.Combobox(self)
     else:
-      #self._control = ttk.Combobox(self, width=60)
       self._control = ttk.Combobox(self, width=-60)
       self._label = ttk.Label(self, text=label, width=-20)
       self._label.pack(side=tk.LEFT)
@@ -1022,20 +1118,16 @@ class FileEntry(ttk.Frame):
   # activate the browse button, which shows a native fileopen dialog and sets the Entry control
   def onBrowse(self):
     if self._label is not None and self._label['text'].startswith("output"):
-      self.set(filedialog.asksaveasfilename(filetypes=self._wildcard_full))
+      flist = (filedialog.asksaveasfilename(filetypes=self._wildcard_full),)
     else:
       flist = filedialog.askopenfilenames(filetypes=self._wildcard_full)
-      if(isinstance(flist, tuple)):
-        slist = []
-        for n in flist:
-          if os.path.commonpath([n, os.getcwd()]).lower() == os.getcwd().lower():
-            slist.append(os.path.relpath(n))
-          else:
-            slist.append(n)
-        if isinstance(self.master, tkTable) and len(slist) > 1:
-          self.master.set(slist)
-        else:
-          self.set(",".join(slist))
+    
+    if(isinstance(flist, tuple)):
+      if isinstance(self.master, tkTable) and len(flist) > 1:
+        # instead of setting only the current control, call our parent to set multiple at once
+        self.master.set(map(relative_paths, flist))
+      else:
+        self.set(",".join(map(relative_paths, flist)))
 
   def onButtonPress(self, *args):
     # temporarily set the cursor to a hourglass
@@ -1133,6 +1225,8 @@ class tkTable(ttk.Labelframe):
           child = LabelCombo(self, "%s_%s" % (token.name,row), token.data)
         elif(token.type == ':'):
           child = ComboPicker(self, "%s_%s" % (token.name,row), token.data)
+        elif(token.type == '!'):
+          child = ComboPicker(self, "%s_%s" % (token.name,row), token.data, True)
         else:
           child = LabelEntry(self, "%s_%s" % (token.name,row))
       child.grid(row=row+1, column=col, sticky="we")
