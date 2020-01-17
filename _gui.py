@@ -25,7 +25,6 @@ https://github.com/pemn/usage-gui
 
 import sys, os, os.path, time
 # import modules from a pyz (zip) file with same name as scripts
-# sys.path.append(os.path.splitext(sys.argv[0])[0] + '.pyz')
 sys.path.insert(0, os.path.splitext(sys.argv[0])[0] + '.pyz')
 import numpy as np
 import pandas as pd
@@ -51,7 +50,7 @@ def pyd_zip_extract(pyd_path = None):
   if not os.path.isdir(pyd_path):
     os.mkdir(pyd_path)
 
-  sys.path.append(pyd_path)
+  sys.path.insert(0, pyd_path)
   os.environ['PATH'] += ';' + pyd_path
 
   for name in pyz.namelist():
@@ -83,7 +82,7 @@ def usage_gui(usage = None):
   else:
     AppTk(usage).mainloop()
 
-def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, keep_null = False):
+def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, keep_null = False):
   '''
   convenience function to return a dataframe based on the input file extension
   csv: ascii tabular data
@@ -97,28 +96,30 @@ def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, 
   '''
 
   if table_name is None:
-    input_path, table_name = table_name_selector(input_path)
+    df_path, table_name = table_name_selector(df_path)
 
   df = None
-  if input_path.lower().endswith('csv'):
-    df = pd.read_csv(input_path, encoding="latin1")
-  elif re.search(r'xls\w?$', input_path, re.IGNORECASE):
-    df = pd_load_excel(input_path, table_name)
-  elif input_path.lower().endswith('bmf'):
-    df = pd_load_bmf(input_path, condition, vl)
+  if df_path.lower().endswith('csv'):
+    df = pd.read_csv(df_path, encoding="latin1")
+  elif re.search(r'xls\w?$', df_path, re.IGNORECASE):
+    df = pd_load_excel(df_path, table_name)
+  elif df_path.lower().endswith('bmf'):
+    df = pd_load_bmf(df_path, condition, vl)
     condition = ''
-  elif input_path.lower().endswith('dgd.isis'):
-    df = pd_load_dgd(input_path, table_name)
-  elif input_path.lower().endswith('isis'):
-    df = pd_load_isisdb(input_path, table_name)
-  elif input_path.lower().endswith('00t'):
-    df = pd_load_tri(input_path)
-  elif input_path.lower().endswith('dm'):
-    df = pd_load_dm(input_path)
-  elif input_path.lower().endswith('shp'):
-    df = pd_load_shape(input_path)
-  elif input_path.lower().endswith('msh'):
-    df = pd_load_mesh(input_path)
+  elif df_path.lower().endswith('dgd.isis'):
+    df = pd_load_dgd(df_path, table_name)
+  elif df_path.lower().endswith('isis'):
+    df = pd_load_isisdb(df_path, table_name)
+  elif df_path.lower().endswith('00t'):
+    df = pd_load_tri(df_path)
+  elif df_path.lower().endswith('dm'):
+    df = pd_load_dm(df_path)
+  elif df_path.lower().endswith('shp'):
+    df = pd_load_shape(df_path)
+  elif df_path.lower().endswith('msh'):
+    df = pd_load_mesh(df_path)
+  elif re.search(r'tiff?$', df_path, re.IGNORECASE):
+    df = pd_load_spectral(df_path)
   else:
     df = pd.DataFrame()
 
@@ -134,32 +135,34 @@ def pd_load_dataframe(input_path, condition = '', table_name = None, vl = None, 
 # temporary backward compatibility
 pd_get_dataframe = pd_load_dataframe
 
-def pd_save_dataframe(df, output_path, sheet_name='Sheet1'):
+def pd_save_dataframe(df, df_path, sheet_name='Sheet1'):
   ''' save a dataframe to one of the supported formats '''
   if df.size:
     if not df.index.dtype_str.startswith('int'):
       df.reset_index(inplace=True)
     while isinstance(df.columns, pd.MultiIndex):
       df.columns = df.columns.droplevel(1)
-    if isinstance(output_path, pd.ExcelWriter) or output_path.lower().endswith('.xlsx'):
-      df.to_excel(output_path, index=False, sheet_name=sheet_name)
-    elif output_path.lower().endswith('.shp'):
-      pd_save_shape(df, output_path)
-    elif output_path.lower().endswith('.dgd.isis'):
-      pd_save_dgd(df, output_path)
-    elif output_path.lower().endswith('.00t'):
-      pd_save_tri(df, output_path)
-    elif len(output_path):
-      df.to_csv(output_path, index=False)
+    if isinstance(df_path, pd.ExcelWriter) or df_path.lower().endswith('.xlsx'):
+      df.to_excel(df_path, index=False, sheet_name=sheet_name)
+    elif df_path.lower().endswith('.dgd.isis'):
+      pd_save_dgd(df, df_path)
+    elif df_path.lower().endswith('.shp'):
+      pd_save_shape(df, df_path)
+    elif df_path.lower().endswith('.00t'):
+      pd_save_tri(df, df_path)
+    elif df_path.lower().endswith('.msh'):
+      pd_save_mesh(df, df_path)
+    elif re.search(r'tiff?$', df_path, re.IGNORECASE):
+      pd_save_spectral(df, df_path)
+    elif len(df_path):
+      df.to_csv(df_path, index=False)
     else:
       print(df.to_string())
   else:
-    print(output_path,"empty")
+    print(df_path,"empty")
 
 def pd_synonyms(df, synonyms):
-  '''
-  from a list of synonyms, find the best candidate amongst the dataframe columns
-  '''
+  ''' from a list of synonyms, find the best candidate amongst the dataframe columns '''
   if len(synonyms) == 0:
     return df.columns[0]
   # first try a direct match
@@ -174,14 +177,14 @@ def pd_synonyms(df, synonyms):
   # fail safe to the first column
   return df.columns[0]
 
-def table_name_selector(input_path, table_name = None):
+def table_name_selector(df_path, table_name = None):
   if table_name is None:
-    m = re.match(r'^(.+)!(\w+)$', input_path)
+    m = re.match(r'^(.+)!(\w+)$', df_path)
     if m:
-      input_path = m.group(1)
+      df_path = m.group(1)
       table_name = m.group(2)
 
-  return input_path, table_name
+  return df_path, table_name
 
 def bm_sanitize_condition(condition):
   if condition is None:
@@ -416,13 +419,18 @@ class commalist(list):
 
 
 def dgd_list_layers(file_path):
+  ''' return the list of layers stored in a dgd '''
   import vulcan
   r = []
-  # return the list of layers stored in a dgd
-  db = vulcan.isisdb(file_path)
-  for record in db.keys:
-    if db.get_key().find('$') == -1:
-      r.append(db.get_key())
+  if vulcan.version_major < 11:
+    db = vulcan.isisdb(file_path)
+    r = [db.get_key() for _ in db.keys if db.get_key().find('$') == -1]
+    db.close()
+  else:
+    dgd = vulcan.dgd(file_path)
+    r = [_ for _ in dgd.list_layers() if _.find('$') == -1]
+    dgd.close()
+
   return r
 
 # Vulcan BMF
@@ -434,14 +442,42 @@ def bmf_field_list(file_path):
   bm.close()
   return r
 
-def pd_load_bmf(input_path, condition = '', vl = None):
-  import vulcan
-  bm = vulcan.block_model(input_path)
-  # get a DataFrame with block model data
-  if vl is not None:
-    vl = filter(bm.is_field, vl)
+def bm_get_pandas_proportional(self, vl=None, select=None):
+  """
+  custom get_pandas dropin replacement with proportional volume inside solid/surface
+  """
+  if select is None:
+     select = ''
 
-  return bm.get_pandas(vl, bm_sanitize_condition(condition))
+  if vl is None:
+     vl = self.field_list() + [ 'xlength', 'ylength', 'zlength', 'xcentre', 'ycentre', 'zcentre', 'xworld', 'yworld', 'zworld' ]
+  
+  vi = None
+  if 'volume' in vl:
+    vi = vl.index('volume')
+
+  self.select(select)
+  data = []
+  for block in self:
+    row = [self.get_string(v) if self.is_string( v ) else self.get(v) for v in vl]
+    if vi is not None:
+      row[vi] = self.match_volume()
+
+    data.append(row)
+  
+  return pd.DataFrame(data, columns=vl)
+
+def pd_load_bmf(df_path, condition = '', vl = None):
+  import vulcan
+  bm = vulcan.block_model(df_path)
+  if vl is not None:
+    vl = list(filter(bm.is_field, vl))
+  
+  # get a DataFrame with block model data
+  if '-X' in condition:
+    return bm_get_pandas_proportional(bm, vl, bm_sanitize_condition(condition))
+  else:
+    return bm.get_pandas(vl, bm_sanitize_condition(condition))
 
 # Vulcan ISIS database
 def isisdb_list(file_path, alternate = False):
@@ -454,11 +490,11 @@ def isisdb_list(file_path, alternate = False):
   db.close()
   return r
 
-def pd_load_isisdb(input_path, table_name = None):
-    if os.path.exists(input_path + '_lock'):
+def pd_load_isisdb(df_path, table_name = None):
+    if os.path.exists(df_path + '_lock'):
       raise Exception('Input database locked')
     import vulcan
-    db = vulcan.isisdb(input_path)
+    db = vulcan.isisdb(df_path)
     # by default, use last table which is the desired one in most cases
     if table_name is None or table_name not in db.table_list():
       table_name = db.table_list()[-1]
@@ -475,13 +511,13 @@ def pd_load_isisdb(input_path, table_name = None):
       key = 'KEY'
     return pd.DataFrame(fdata, None, [key] + field_list)
 
-def pd_load_dgd(input_path, layer_dgd = None):
+def pd_load_dgd(df_path, layer_dgd = None):
   ''' create a dataframe with object points and attributes '''
   import vulcan
-  obj_attr = ['value', 'name', 'group', 'feature', 'description']
-  df = pd.DataFrame(None, columns=['x','y','z','w','t','n','p','closed','layer'] + obj_attr)
+  obj_attr = ['name', 'group', 'feature', 'description', 'value', 'colour']
+  df = pd.DataFrame(None, columns=smartfilelist.default_columns + ['p','closed','layer','oid'] + obj_attr)
 
-  dgd = vulcan.dgd(input_path)
+  dgd = vulcan.dgd(df_path)
 
   if dgd.is_open():
     layers = layer_dgd
@@ -494,6 +530,7 @@ def pd_load_dgd(input_path, layer_dgd = None):
       if not dgd.is_layer(l):
         continue
       layer = dgd.get_layer(l)
+      oid = 0
       for obj in layer:
         for n in range(obj.num_points()):
           row = len(df)
@@ -504,20 +541,25 @@ def pd_load_dgd(input_path, layer_dgd = None):
           df.loc[row, 'z'] = p.get_z()
           df.loc[row, 'w'] = p.get_w()
           df.loc[row, 't'] = p.get_t()
-          df.loc[row, 'p'] = p.get_name()
+          # point sequence withing this polygon
           df.loc[row, 'n'] = n
+
+          # point name attribute
+          df.loc[row, 'p'] = p.get_name()
           df.loc[row, 'closed'] = obj.is_closed()
           df.loc[row, 'layer'] = layer.get_name()
+          df.loc[row, 'oid'] = oid
           for t in obj_attr:
             df.loc[row, t] = getattr(obj, t)
+        oid += 1
 
   return df
 
-def pd_save_dgd(df, output_path):
-  ''' create a vulcan objects from a dataframe '''
+def pd_save_dgd(df, df_path):
+  ''' create vulcan objects from a dataframe '''
   import vulcan
   obj_attr = ['value', 'name', 'group', 'feature', 'description']
-  dgd = vulcan.dgd(output_path, 'w' if os.path.exists(output_path) else 'c')
+  dgd = vulcan.dgd(df_path, 'w' if os.path.exists(df_path) else 'c')
 
   layer_cache = dict()
   
@@ -555,23 +597,46 @@ def pd_save_dgd(df, output_path):
     dgd.save_layer(v)
 
 # Vulcan Triangulation 00t
-def pd_load_tri(input_path):
+def pd_load_tri(df_path):
   import vulcan
-  tri = vulcan.triangulation(input_path)
+  tri = vulcan.triangulation(df_path)
   cv = tri.get_colour()
   cn = 'colour'
-  if tri.is_rgb():
+  if vulcan.version_major >= 11 and tri.is_rgb():
     cv = np.sum(np.multiply(tri.get_rgb(), [2**16,2**8,1]))
     cn = 'rgb'
 
   return pd.DataFrame([tri.get_node(int(f[n])) + [0,bool(n),n,1,f[n],cv] for f in tri.get_faces() for n in range(3)], columns=smartfilelist.default_columns + ['closed','node',cn])
 
-def pd_save_tri(df, output_path):
+def df_to_nodes_faces(df, node_name = 'node'):
+  nodes = []
+  faces = []
+
+  df.set_index(['filename', node_name], True, False, True)
+  df['i'] = range(len(df))
+  df[node_name] = -1
+  node_loc = df.columns.get_loc(node_name)
+  df.sort_index(inplace=True)
+  for irow in df.index.unique():
+    drow = df.xs(irow)
+    df.loc[irow, node_name] = len(nodes)
+    nodes.append([drow.iat[0, 0], drow.iat[0, 1], drow.iat[0, 2]])
+
+  df.sort_values('i', inplace=True)
+  f = []
+  for i in range(len(df)):
+    f.append(int(df.iat[i, node_loc]))
+    if len(f) == 3:
+      faces.append(f.copy())
+      f.clear()
+
+  return(nodes, faces)
+
+def pd_save_tri(df, df_path):
   import vulcan
-  node_name = 'node'
   
-  if os.path.exists(output_path):
-    os.remove(output_path)
+  if os.path.exists(df_path):
+    os.remove(df_path)
 
   tri = vulcan.triangulation("", "w")
 
@@ -586,30 +651,23 @@ def pd_save_tri(df, output_path):
     print('default color')
     tri.set_colour(1)
 
-  node_list = []
-  
-  node_sort = df[node_name].sort_values()
-  for i in node_sort.index:
-    n = df.loc[i, node_name]
-    if n not in node_list:
-      node_list.append(n)
-      tri.add_node(df.iloc[i, 0],df.iloc[i, 1],df.iloc[i, 2])
+  if 'filename' not in df:
+    df['filename'] = ''
 
-  f = []
-  for i in df.index:
-    f.append(int(df.loc[i, node_name]))
-    if len(f) == 3:
-      tri.add_face(*f)
-      f.clear()
+  nodes, faces = df_to_nodes_faces(df)
+  for n in nodes:
+    tri.add_node(*n)
+  for f in faces:
+    tri.add_face(*f)
 
-  tri.save(output_path)
+  tri.save(df_path)
 
 # Datamine DM
 
-def pd_load_dm(input_path, condition = ''):
+def pd_load_dm(df_path, condition = ''):
   import win32com.client
   dm = win32com.client.Dispatch('DmFile.DmTable')
-  dm.Open(input_path, 0)
+  dm.Open(df_path, 0)
   fdata = []
   n = dm.Schema.FieldCount + 1
   for i in range(dm.GetRowCount()):
@@ -627,13 +685,13 @@ def dm_field_list(file_path):
 
 # Microsoft Excel compatibles
 
-def csv_field_list(input_path):
-  df = pd.read_csv(input_path, encoding="latin1", nrows=1)
+def csv_field_list(df_path):
+  df = pd.read_csv(df_path, encoding="latin1", nrows=1)
   return list(df.columns)
 
-def excel_field_list(input_path, table_name, alternate = False):
+def excel_field_list(df_path, table_name, alternate = False):
   import openpyxl
-  wb = openpyxl.load_workbook(input_path)
+  wb = openpyxl.load_workbook(df_path)
   r = []
   if alternate:
     r = wb.sheetnames
@@ -644,18 +702,18 @@ def excel_field_list(input_path, table_name, alternate = False):
 
   return r
 
-def pd_load_excel(input_path, table_name = None):
+def pd_load_excel(df_path, table_name = None):
   df = None
   if pd.__version__ < '0.20':
     import openpyxl
-    wb = openpyxl.load_workbook(input_path)
+    wb = openpyxl.load_workbook(df_path)
     data = wb.active.values
     if table_name and table_name in wb:
       data = wb[table_name].values
     cols = next(data)
-    df = pd.DataFrame(data, columns=cols)
+    df = pd.DataFrame(data, columns=[i if cols[i] is None else cols[i] for i in range(len(cols))])
   else:
-    df = pd.read_excel(input_path, table_name)
+    df = pd.read_excel(df_path, table_name)
     if not isinstance(df, pd.DataFrame):
       _, df = df.popitem(False)
   return df
@@ -667,9 +725,9 @@ def pd_load_shape(file_path):
 
   shapes = shapefile.Reader(file_path)
 
-  df = pd.DataFrame(None, columns=smartfilelist.default_columns + ['record','part','type','layer'])
+  df = pd.DataFrame(None, columns=smartfilelist.default_columns + ['oid','part','type','layer'])
 
-  item_n = 0
+  record_n = 0
   row = 0
   for item in shapes.shapeRecords():
     # object without a valid layer name will have this default layer
@@ -687,40 +745,45 @@ def pd_load_shape(file_path):
         for k,v in fields.items():
           df.loc[row, k] = v
 
-        df.loc[row, 'type'] = item.shape.shapeTypeName
-        df.loc[row, 'record'] = item_n
-        df.loc[row, 'part'] = part_n
         df.loc[row, 'n'] = n
         df.loc[row, 'w'] = 0
         df.loc[row, 't'] = n != p
+
+        df.loc[row, 'oid'] = record_n
+        df.loc[row, 'type'] = item.shape.shapeTypeName
+        df.loc[row, 'part'] = part_n
+
         row += 1
 
       p1 = p
-    item_n += 1
+    record_n += 1
 
   return df
 
-
-def pd_save_shape(df, output_path):
+def pd_save_shape(df, df_path):
   import shapefile
 
-  shpw = shapefile.Writer(os.path.splitext(output_path)[0])
+  shpw = shapefile.Writer(os.path.splitext(df_path)[0])
 
   for i in range(5, df.shape[1]):
     shpw.field(df.columns[i], 'C' if df.dtypes[i] == 'object' else 'N')
 
   p = []
-  n = None
-  for row in df.index:
-    n = df.loc[row, 'n']
-    # last row special case
-    p.insert(0, n)
+  n = len(df)
+  for row in df.index[::-1]:
+    if 'n' in df:
+      n = df.loc[row, 'n']
+    else:
+      n -= 1
+
+    p.insert(0, row)
+
+    xyzwt = [_ for _ in 'xyzwt' if _ in df]
 
     if n == 0:
-      points = df.take(p).take(range(5), 1).values.tolist()
-      shpw.polyz([points])
-      # shpw.record(*[df.iloc[row, c] for c in range(6, df.shape[1])])
-      shpw.record(*[df.iloc[row, c] for c in range(5, df.shape[1])])
+      rows = df.take(p)
+      shpw.polyz([rows[xyzwt].values.tolist()])
+      shpw.record(*[pd.np.nan_to_num(df.iloc[row, c]) for c in range(5, df.shape[1])])
       p.clear()
   
   shpw.close()
@@ -732,9 +795,9 @@ def shape_field_list(file_path):
 
 # Leapfrog Mesh
 
-def pd_load_mesh(input_path):
+def pd_load_mesh(df_path):
   import struct
-  file = open(input_path, "rb")
+  file = open(df_path, "rb")
 
   index = None
   binary = None
@@ -764,8 +827,8 @@ def pd_load_mesh(input_path):
   node_wide = int(node_wide)
   node_size = int(node_size)
 
-  face_pack = struct.Struct('i' * face_wide)
   node_pack = struct.Struct('d' * node_wide)
+  face_pack = struct.Struct('i' * face_wide)
   # skip unknown 12 byte header
   # maybe on some cases it contains rgb color?
   print("%02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x = %.2f %.2f %.2f" % tuple(struct.unpack_from('12B', binary, 0) + struct.unpack_from('3f', binary, 0)))
@@ -773,15 +836,50 @@ def pd_load_mesh(input_path):
   node_list = list()
   face_list = list()
   for i in range(face_size):
-    # print(i, p, face_pack.unpack_from(binary, p))
     face_list.append(face_pack.unpack_from(binary, p))
     p += face_pack.size
   for i in range(node_size):
-    # print(i, p, node_pack.unpack_from(binary, p))
     node_list.append(node_pack.unpack_from(binary, p))
     p += node_pack.size
 
   return pd.DataFrame([node_list[int(f[n])] + (0,bool(n),n,1,f[n]) for f in face_list for n in range(3)], columns=smartfilelist.default_columns + ['closed','node'])
+
+def pd_save_mesh(df, df_path):
+  import struct
+  node_pack = struct.Struct('3d')
+  face_pack = struct.Struct('3i')
+
+  file = open(df_path, "wb")
+  nodes, faces = df_to_nodes_faces(df)
+  file.write(b'%%ARANZ-1.0\n\n[index]\nTri Integer 3 %d;\nLocation Double 3 %d;\n\n[binary]' % (len(faces), len(nodes)))
+  # write unknown header
+  file.write(struct.pack('3i', 15732735, 1115938331, 1072939210))
+
+  for f in faces:
+    file.write(face_pack.pack(*f))
+  for n in nodes:
+    file.write(node_pack.pack(*n))
+
+  file.close()
+
+# images and other binary databases
+def pd_load_spectral(df_path):
+  import skimage.io
+  df = skimage.io.imread(df_path)
+  channels = 1
+  if df.ndim >= 3:
+    channels = df.shape[2]
+  dfi = np.indices(df.shape[:2]).transpose(1,2,0).reshape((np.prod(df.shape[:2]),2))
+  dfx = df.reshape((np.prod(df.shape[:2]), channels))
+  return pd.DataFrame(np.concatenate([dfi, dfx], 1), columns=['x','y'] + list(range(channels)))
+
+def pd_save_spectral(df, df_path):
+  import skimage.io
+  # original image width and height are recoverable from the max x and max y
+  wh = np.max(df, 0)
+  dfx = df.drop(df.columns[:2], 1)
+  im_out = np.reshape(dfx.values, (wh.values[0] + 1, wh.values[1] + 1, wh.size - 2))
+  skimage.io.imsave(df_path, im_out)
 
 class smartfilelist(object):
   '''
@@ -790,51 +888,56 @@ class smartfilelist(object):
   '''
   default_columns = ['x','y','z','w','t','n']
   # global value cache, using path as key
-  _cache = {}
+  _cache = [{},{}]
   @staticmethod
-  def get(input_path, alternate = False):
+  def get(df_path, s = 0):
     # special case for multiple files. use first
-    if isinstance(input_path, commalist):
-      if len(input_path):
-        input_path = input_path[0][0]
+    if isinstance(df_path, commalist):
+      if len(df_path):
+        df_path = df_path[0][0]
       else:
-        input_path = ""
+        df_path = ""
+    
     
     r = []
 
     # if this file is already cached, skip to the end
-    if(input_path in smartfilelist._cache and not alternate):
-      r = smartfilelist._cache[input_path]
+    if(df_path in smartfilelist._cache[s]):
+      r = smartfilelist._cache[s][df_path]
     else:
-      input_path, table_name = table_name_selector(input_path)
-      if(os.path.exists(input_path)):
-        if(input_path.lower().endswith(".dgd.isis")):
-          # list layers of vulcan dgd files
-          r = dgd_list_layers(input_path)
-        elif(input_path.lower().endswith(".isis")):
-          # vulcan isis database
-          r = isisdb_list(input_path, alternate)
-        elif(input_path.lower().endswith(".bmf")):
-          # vulcan block model
-          r = bmf_field_list(input_path)
-        elif(input_path.lower().endswith(".00t")):
+      df_path, table_name = table_name_selector(df_path)
+      if os.path.exists(df_path):
+        input_ext = os.path.splitext(df_path.lower())[1]
+        if df_path.lower().endswith(".dgd.isis"):
+          if s == 1:
+            r = dgd_list_layers(df_path)
+          else:
+            r = smartfilelist.default_columns + ['p','closed','layer','oid','name','group','feature','description','value','colour']
+        elif input_ext == ".isis":
+          r = isisdb_list(df_path, s)
+        elif input_ext == ".bmf":
+          r = bmf_field_list(df_path)
+        elif input_ext == ".00t" and s == 0:
           r = smartfilelist.default_columns + ['closed','node','rgb','colour']
-        elif(input_path.lower().endswith(".msh")):
+        elif input_ext == ".msh" and s == 0:
           r = smartfilelist.default_columns + ['closed','node']
-        elif(input_path.lower().endswith(".csv")):
-          r = csv_field_list(input_path)
-        elif(re.search(r'xls\w?$', input_path, re.IGNORECASE)):
-          r = excel_field_list(input_path, table_name, alternate)
-        elif(input_path.lower().endswith(".dm")):
-          r = dm_field_list(input_path)
-        elif(input_path.lower().endswith(".shp")):
-          # ESRI shape file
-          r = shape_field_list(input_path)
-        elif(input_path.lower().endswith(".dxf")):
+        elif input_ext == ".csv" and s == 0:
+          r = csv_field_list(df_path)
+        elif re.search(r'xls\w?$', df_path, re.IGNORECASE):
+          r = excel_field_list(df_path, table_name, s)
+        elif input_ext == ".dm" and s == 0:
+          r = dm_field_list(df_path)
+        elif input_ext == ".shp" and s == 0:
+          r = shape_field_list(df_path)
+        elif input_ext == ".dxf" and s == 0:
           r = smartfilelist.default_columns + ['layer']
-        # we only allow one cache per file but many controls may use same source
-        if (not alternate):
-          smartfilelist._cache[input_path] = r
+        elif input_ext == ".zip" and s == 0:
+          from zipfile import ZipFile
+          r = ZipFile(df_path).namelist()
+        elif re.search(r'tiff?$', df_path, re.IGNORECASE):
+          r = list('xy0123456789')
+        
+        smartfilelist._cache[s][df_path] = r
 
     return r
 
@@ -893,7 +996,7 @@ class ScriptFrame(ttk.Frame):
           c = ComboPicker(self, token.name, token.data)
       elif token.type == '~':
         import gisportal
-        c = gisportal.ArcGisPortal(self, token.name, token.data)
+        c = gisportal.ArcGisPortal(self, token.name, None, token.data)
       elif token.name:
         c = LabelEntry(self, token.name)
       else:
@@ -933,7 +1036,7 @@ class ScriptFrame(ttk.Frame):
   def set(self, values):
     if isinstance(values, dict):
       for k,v in self.children.items():
-        if k in values:
+        if k in values and values[k] is not np.nan:
           v.set(values[k])
     else:
       for i in range(len(self.tokens)):
@@ -1104,12 +1207,15 @@ class FileEntry(ttk.Frame):
     ttk.Frame.__init__(self, master, name=label)
     self._button = ttk.Button(self, text="⛘", command=self.onBrowse)
     self._button.pack(side=tk.RIGHT)
+    self._output = False
+    ttk.Style().configure('red.TButton', foreground='red')
     if isinstance(master, tkTable):
       self._control = ttk.Combobox(self)
     else:
       self._control = ttk.Combobox(self, width=-60)
       self._label = ttk.Label(self, text=label, width=-20)
       self._label.pack(side=tk.LEFT)
+      self._output = self._label['text'].startswith("output")
     self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
     self._control.bind("<ButtonPress>", self.onButtonPress)
     self._wildcard_list = wildcard.split(',')
@@ -1117,7 +1223,7 @@ class FileEntry(ttk.Frame):
   
   # activate the browse button, which shows a native fileopen dialog and sets the Entry control
   def onBrowse(self):
-    if self._label is not None and self._label['text'].startswith("output"):
+    if self._output:
       flist = (filedialog.asksaveasfilename(filetypes=self._wildcard_full),)
     else:
       flist = filedialog.askopenfilenames(filetypes=self._wildcard_full)
@@ -1146,8 +1252,11 @@ class FileEntry(ttk.Frame):
     return self._control.get()
   
   def set(self, value):
-    if(value == None or len(value) == 0):
+    if(value == None or value is np.nan or len(value) == 0):
       return
+    if not self._output:
+      self._button['style'] = '' if os.path.exists(value) else 'red.TButton'
+
     self._control.delete(0, tk.END)
     self._control.insert(0, value)
 
@@ -1316,6 +1425,7 @@ class AppTk(tk.Tk):
     menu_file.add_command(label='Copy Command Line', command=self.script.copy)
     menu_file.add_command(label='Open Settings', command=self.openSettings)
     menu_file.add_command(label='Save Settings', command=self.saveSettings)
+    menu_file.add_command(label='Load Metadata', command=self.importMetadata)
     menu_file.add_command(label='Exit', command=self.destroy)
     menu_help.add_command(label='Help', command=self.showHelp)
     menu_help.add_command(label='About', command=self.showAbout)
@@ -1359,6 +1469,16 @@ class AppTk(tk.Tk):
     if len(result) == 0:
       return
     Settings(result).save(self.script.get(True))
+
+  def importMetadata(self):
+    result = filedialog.askopenfilename(filetypes=[("xlsx", "*.xlsx")])
+    if len(result) == 0:
+      return
+    df = pd_load_excel(result, 'metadata')
+    df.set_index('vk', inplace=True)
+    dfd = df.to_dict()
+    if 'vs' in dfd:
+      self.script.set(dfd['vs'])
   
   def destroy(self):
     Settings().save(self.script.get(True))
