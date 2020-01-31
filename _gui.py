@@ -100,6 +100,7 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
 
   df = None
   if df_path.lower().endswith('csv'):
+    # df = pd.read_csv(df_path, encoding="latin1")
     df = pd.read_csv(df_path, encoding="latin1")
   elif re.search(r'xls\w?$', df_path, re.IGNORECASE):
     df = pd_load_excel(df_path, table_name)
@@ -112,10 +113,14 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
     df = pd_load_isisdb(df_path, table_name)
   elif df_path.lower().endswith('00t'):
     df = pd_load_tri(df_path)
+  elif df_path.lower().endswith('00g'):
+    df = pd_load_grid(df_path)
   elif df_path.lower().endswith('dm'):
     df = pd_load_dm(df_path)
   elif df_path.lower().endswith('shp'):
     df = pd_load_shape(df_path)
+  elif df_path.lower().endswith('json'):
+    df = pd.read_json(df_path)
   elif df_path.lower().endswith('msh'):
     df = pd_load_mesh(df_path)
   elif re.search(r'tiff?$', df_path, re.IGNORECASE):
@@ -138,7 +143,7 @@ pd_get_dataframe = pd_load_dataframe
 def pd_save_dataframe(df, df_path, sheet_name='Sheet1'):
   ''' save a dataframe to one of the supported formats '''
   if df.size:
-    if not df.index.dtype_str.startswith('int'):
+    if not str(df.index.dtype).startswith('int'):
       df.reset_index(inplace=True)
     while isinstance(df.columns, pd.MultiIndex):
       df.columns = df.columns.droplevel(1)
@@ -150,6 +155,8 @@ def pd_save_dataframe(df, df_path, sheet_name='Sheet1'):
       pd_save_shape(df, df_path)
     elif df_path.lower().endswith('.00t'):
       pd_save_tri(df, df_path)
+    elif df_path.lower().endswith('.json'):
+      df.to_json(df_path, 'records')
     elif df_path.lower().endswith('.msh'):
       pd_save_mesh(df, df_path)
     elif re.search(r'tiff?$', df_path, re.IGNORECASE):
@@ -373,7 +380,7 @@ class Settings(str):
     return super().__new__(cls, value)
 
   def save(self, obj):
-    pickle.dump(obj, open(self,'wb'), -1)
+    pickle.dump(obj, open(self,'wb'), 4)
     
   def load(self):
     if os.path.exists(self):
@@ -662,6 +669,17 @@ def pd_save_tri(df, df_path):
 
   tri.save(df_path)
 
+# Vulcan Grid 00g
+def pd_load_grid(df_path):
+  import vulcan
+
+  print(df_path)
+  grid = vulcan.grid(df_path)
+  df = grid.get_pandas()
+  df['filename'] = os.path.basename(df_path)
+  print(df)
+  return df
+
 # Datamine DM
 
 def pd_load_dm(df_path, condition = ''):
@@ -690,15 +708,25 @@ def csv_field_list(df_path):
   return list(df.columns)
 
 def excel_field_list(df_path, table_name, alternate = False):
-  import openpyxl
-  wb = openpyxl.load_workbook(df_path)
-  r = []
-  if alternate:
-    r = wb.sheetnames
-  elif table_name and table_name in wb:
-    r = next(wb[table_name].values)
+  if sys.hexversion < 0x3070000:
+    import openpyxl
+    wb = openpyxl.load_workbook(df_path)
+    r = []
+    if alternate:
+      r = wb.sheetnames
+    elif table_name and table_name in wb:
+      r = next(wb[table_name].values)
+    else:
+      r = next(wb.active.values)
   else:
-    r = next(wb.active.values)
+    import xlrd
+    wb = xlrd.open_workbook(df_path)
+    if alternate:
+      r = wb.sheet_names()
+    elif table_name and table_name in wb.sheet_names():
+      r = wb.sheet_by_name(table_name).row_values(0)
+    else:
+      r = wb.sheet_by_index(0).row_values(0)
 
   return r
 
@@ -762,11 +790,13 @@ def pd_load_shape(file_path):
 
 def pd_save_shape(df, df_path):
   import shapefile
-
   shpw = shapefile.Writer(os.path.splitext(df_path)[0])
 
-  for i in range(5, df.shape[1]):
-    shpw.field(df.columns[i], 'C' if df.dtypes[i] == 'object' else 'N')
+  rc = []
+  for i in range(df.shape[1]):
+    if df.columns[i] not in 'xyzwtn':
+      shpw.field(df.columns[i], 'C' if df.dtypes[i] == 'object' else 'F', decimal=4)
+      rc.append(df.columns[i])
 
   p = []
   n = len(df)
@@ -783,7 +813,7 @@ def pd_save_shape(df, df_path):
     if n == 0:
       rows = df.take(p)
       shpw.polyz([rows[xyzwt].values.tolist()])
-      shpw.record(*[pd.np.nan_to_num(df.iloc[row, c]) for c in range(5, df.shape[1])])
+      shpw.record(*[pd.np.nan_to_num(df.loc[row, c]) for c in rc])
       p.clear()
   
   shpw.close()
@@ -919,6 +949,8 @@ class smartfilelist(object):
           r = bmf_field_list(df_path)
         elif input_ext == ".00t" and s == 0:
           r = smartfilelist.default_columns + ['closed','node','rgb','colour']
+        elif input_ext == ".00g" and s == 0:
+          r = ['x','y','value','mask','filename']
         elif input_ext == ".msh" and s == 0:
           r = smartfilelist.default_columns + ['closed','node']
         elif input_ext == ".csv" and s == 0:
