@@ -6,7 +6,7 @@ On some environments the python interpreter is bundled with a 3rd party applicat
 May also be used to run scripts using the python bundled with the commercial software Maptek Vulcan.  
 
 ## Screenshot
-![screenshot](https://github.com/pemn/usage-gui/blob/master/assets/example1os.png)
+![screenshot](./assets/example1os.png?raw=true)
 
 ## Features
  - A graphical user interface generated from a simple one line template
