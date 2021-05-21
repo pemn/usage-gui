@@ -703,6 +703,7 @@ def pd_load_dgd(df_path, layer_dgd = None):
 
   dgd = vulcan.dgd(df_path)
 
+  row = 0
   if dgd.is_open():
     layers = layer_dgd
     if layer_dgd is None:
@@ -716,7 +717,6 @@ def pd_load_dgd(df_path, layer_dgd = None):
       layer = dgd.get_layer(l)
       oid = 0
       for obj in layer:
-        row = len(df)
         df_row = pd.Series()
         df_row['oid'] = str(oid)
         df_row['layer'] = layer.get_name()
@@ -725,6 +725,8 @@ def pd_load_dgd(df_path, layer_dgd = None):
         if obj.get_type() == 'TEXT3D':
           df_row['x'],df_row['y'],df_row['z'],df_row['w'],df_row['t'],df_row['p'] = obj.get_origin()
           df_row['n'] = 0
+          df.loc[row] = df_row
+          row += 1
         else:
           for n in range(obj.num_points()):
             df_row['closed'] = obj.is_closed()
@@ -735,9 +737,10 @@ def pd_load_dgd(df_path, layer_dgd = None):
             df_row['w'] = p.get_w()
             df_row['t'] = p.get_t()
             df_row['p'] = p.get_name()
-            # point sequence withing this polygon
+            # point sequence within this polygon
             df_row['n'] = n
-        df.loc[row] = df_row
+            df.loc[row] = df_row
+            row += 1
         oid += 1
 
   return df
@@ -782,7 +785,6 @@ def pd_save_dgd(df, df_path):
       layer_cache[layer_name].append(obj)
       c.clear()
 
-
   for v in layer_cache.values():
     dgd.save_layer(v)
 
@@ -800,24 +802,47 @@ def pd_load_tri(df_path):
 
   return pd.DataFrame([tri.get_node(int(f[n])) + [0,bool(n),n,1,f[n],cv] for f in tri.get_faces() for n in range(3)], columns=smartfilelist.default_columns + ['closed','node',cn])
 
-def df_to_nodes_faces_simple(df, node_name = 'node', xyz = ['x','y','z']):
+def df_to_nodes_faces_simple(df, node_name, xyz):
   ''' fast version only supporting a single triangulation '''
-  print("# df_to_nodes_faces_simple")
-  c = time.time()
-  import numpy as np
-  nodes = np.zeros((int(df[node_name].max() + 1), len(xyz)))
-  # we must use a loop since nodes may be duplicated
-  for i,row in df.iterrows():
-    nodes[int(row[node_name])] = row[xyz]
+  import pandas as pd
+  # nodes are duplicated for each face in df
+  # create a list where they are unique again
+  i_row = df[node_name].reset_index().drop_duplicates(subset=node_name)
+  nodes = df.loc[i_row['index'], xyz]
 
   face_size = 3
-  if 'n' in df:
-    face_size = df['n'].max() + 1
+  if 'n' in df and len(df):
+    face_size = int(df['n'].max()) + 1
   # faces are unique so we can use the input data
   faces = df[node_name].values.reshape((len(df) // face_size, face_size))
+  return nodes.values, faces
 
-  print("# df_to_nodes_faces_simple",time.time() - c)
-  return nodes, faces
+def df_to_nodes_faces_lines(df, node_name = 'node', xyz = ['x','y','z']):
+  nodes = []
+  lines = []
+  if 'type' in df:
+    l_nodes, lines = df_to_nodes_lines(df.query("type != 'TRIANGLE'"), node_name, xyz)
+    nodes.extend(l_nodes)
+    df = df.query("type == 'TRIANGLE'")
+  t_nodes, faces = df_to_nodes_faces(df, node_name, xyz)
+  nodes.extend(t_nodes)
+  return nodes, faces, lines
+
+def df_to_nodes_lines(df, node_name, xyz):
+  nodes = df[xyz].values.take(df[node_name], 0)
+  lines = []
+  n = len(df)
+  part = []
+  for row in df.index[::-1]:
+    if 'n' in df:
+      n = df.loc[row, 'n']
+    else:
+      n -= 1
+    part.insert(0, n)
+    if n == 0:
+      lines.insert(0, part)
+      part = []
+  return nodes, lines
 
 def df_to_nodes_faces(df, node_name = 'node', xyz = ['x','y','z']):
   ''' 
@@ -825,7 +850,7 @@ def df_to_nodes_faces(df, node_name = 'node', xyz = ['x','y','z']):
   slow, use the _simple version if node reindexing is not required
   '''
   if 'n' not in df or 'filename' not in df or df['filename'].nunique() == 1:
-    return df_to_nodes_faces_simple(df, 'node', xyz)
+    return df_to_nodes_faces_simple(df, node_name, xyz)
   print("# df_to_nodes_faces")
   c = time.time()
   import numpy as np
@@ -879,7 +904,7 @@ def pd_save_tri(df, df_path):
   for n in nodes:
     tri.add_node(*n)
   for f in faces:
-    tri.add_face(*f)
+    tri.add_face(*map(int,f))
 
   tri.save(df_path)
 
@@ -887,11 +912,9 @@ def pd_save_tri(df, df_path):
 def pd_load_grid(df_path):
   import vulcan
 
-  print(df_path)
   grid = vulcan.grid(df_path)
   df = grid.get_pandas()
   df['filename'] = os.path.basename(df_path)
-  print(df)
   return df
 
 # Datamine DM
@@ -1193,8 +1216,6 @@ def pd_load_mesh(df_path):
   import numpy as np
   import pandas as pd
   nodes, faces = leapfrog_load_mesh(df_path)
-  # print(np.shape(nodes))
-  # print(np.shape(faces))
   df_data = [nodes[int(f[n])] + (0,bool(n),n,1,f[n]) for f in faces for n in range(3)]
   return pd.DataFrame(df_data, columns=smartfilelist.default_columns + ['closed','node'])
 
@@ -1216,34 +1237,39 @@ def pd_save_mesh(df, df_path):
   nodes, faces = df_to_nodes_faces(df)
   leapfrog_save_mesh(nodes, faces, df_path)
 
+def img_to_df(img):
+  import numpy as np
+  import pandas as pd
+  channels = 1
+  if img.ndim >= 3:
+    channels = img.shape[2]
+  dfi = np.indices(img.shape[:2]).transpose(1,2,0).reshape((np.prod(img.shape[:2]),2))
+  dfx = img.reshape((np.prod(img.shape[:2]), channels))
+  return pd.DataFrame(np.concatenate([dfi, dfx], 1), columns=['x','y'] + list(map(str,range(channels))))
+
 # images and other binary databases
 def pd_load_spectral(df_path):
   import skimage.io
-  import numpy as np
-  import pandas as pd
-  df = skimage.io.imread(df_path)
-  channels = 1
-  if df.ndim >= 3:
-    channels = df.shape[2]
-  dfi = np.indices(df.shape[:2]).transpose(1,2,0).reshape((np.prod(df.shape[:2]),2))
-  dfx = df.reshape((np.prod(df.shape[:2]), channels))
-  return pd.DataFrame(np.concatenate([dfi, dfx], 1), columns=['x','y'] + list(map(str,range(channels))))
+  #df = skimage.io.imread(df_path)
+  return img_to_df(skimage.io.imread(df_path))
+  # channels = 1
+  # if df.ndim >= 3:
+  #   channels = df.shape[2]
+  # dfi = np.indices(df.shape[:2]).transpose(1,2,0).reshape((np.prod(df.shape[:2]),2))
+  # dfx = df.reshape((np.prod(df.shape[:2]), channels))
+  # return pd.DataFrame(np.concatenate([dfi, dfx], 1), columns=['x','y'] + list(map(str,range(channels))))
 
 def pd_save_spectral(df, df_path):
   import skimage.io
   import numpy as np
   # original image width and height are recoverable from the max x and max y
   wh = np.max(df, 0)
-  #print(df)
   df.drop(['x','y'], 1, inplace=True)
-  #print(df.shape, wh['x'], wh['y'], (wh['x'] + 1) * (wh['y'] + 1))
-  #im_out = np.reshape(dfx.values, (wh.values[0] + 1, wh.values[1] + 1, wh.size - 2))
-  #im_out = np.reshape(df.values, (wh['x'] + 1, wh['y'] + 1, wh.size - 2))
+
   if wh.size > 3:
     im_out = np.reshape(df.values, (wh['x'] + 1, wh['y'] + 1, wh.size - 2))
   else:
     im_out = np.reshape(df[df.columns[0]], (wh['x'] + 1, wh['y'] + 1))
-  #print(im_out.shape)
   skimage.io.imsave(df_path, im_out)
 
 
@@ -1251,6 +1277,7 @@ def pd_save_spectral(df, df_path):
 def wavefront_load_obj(df_path):
   nodes = []
   faces = []
+  lines = []
   file = open(df_path, "r")
   for l in file:
     c = l.split()
@@ -1258,29 +1285,45 @@ def wavefront_load_obj(df_path):
       nodes.append(tuple(map(float, c[1:])))
     if c[0] == 'f':
       faces.append([int(_) - 1 for _ in c[1:]])
+    if c[0] == 'l':
+      lines.append([int(_) - 1 for _ in c[1:]])
   file.close()
-  return nodes, faces
+  return nodes, faces, lines
 
 def pd_load_obj(df_path):
   import pandas as pd
-  nodes, faces = wavefront_load_obj(df_path)
-  face_size = len(faces[0])
-  return pd.DataFrame([nodes[int(f[n])] + (0,bool(n),n,1,int(f[n])) for f in faces for n in range(face_size)], columns=smartfilelist.default_columns + ['closed','node'])
+  nodes, faces, lines = wavefront_load_obj(df_path)
+  df = pd.DataFrame()
+  columns = smartfilelist.default_columns + ['closed','node','type']
+  if len(faces):
+    # mesh
+    df = df.append(pd.DataFrame([nodes[int(f[i])] + (0,bool(i),i,1,int(f[i]),'TRIANGLE') for f in faces for i in range(len(f))], columns=columns))
+  if len(lines):
+    # polyline
+    df = df.append(pd.DataFrame([nodes[int(n)] + (0,bool(n),n,1,int(n),'POLYLINE') for f in lines for n in f], columns=columns))
+  if len(lines) == 0 and len(faces) == 0:
+    # point cloud
+    df = df.append(pd.DataFrame([p + (0,0,0,0,0,'POINT') for p in nodes], columns=columns))
 
-def wavefront_save_obj(nodes, faces, df_path):
+  return df
+
+def wavefront_save_obj(df_path, nodes, faces = None, lines = None):
   file = open(df_path, "w")
   for n in nodes:
-    #print('v %f %f %f' % tuple(n), file=file)
     print('v', *n, file=file)
-  for f in faces:
-    #print('f %d %d %d' % tuple(f), file=file)
-    print('f', *[_ + 1 for _ in f], file=file)
+  if faces is not None:
+    for f in faces:
+      print('f', *[_ + 1 for _ in f], file=file)
+  if lines is not None:
+    for l in lines:
+      print('l', *[_ + 1 for _ in l], file=file)
+
   file.close()
 
 
 def pd_save_obj(df, df_path):
-  nodes, faces = df_to_nodes_faces(df)
-  wavefront_save_obj(nodes, faces, df_path)
+  nodes, faces, lines = df_to_nodes_faces_lines(df)
+  wavefront_save_obj(df_path, nodes, faces, lines)
 
 ### SMART ###
 class smartfilelist(object):
