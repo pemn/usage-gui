@@ -50,7 +50,7 @@ choice radio button
 file browse control, listing only files that match one of the given extensions
 - `<name>:<another control name>`  
 directory select
-- `<name>*`
+- `<name>*`  
 derived control that gets its list values from the file pointed by another file browse control  
 different files will have different associated lists, generated on the fly  
 Ex.: csv files will be a list of column names  
