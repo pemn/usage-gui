@@ -192,6 +192,9 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
   shp: ESRI shape file
   '''
   import pandas as pd
+  # early exit for cases where a script is calling another
+  if isinstance(df_path, pd.DataFrame):
+    return df_path
   if table_name is None:
     df_path, table_name = table_name_selector(df_path)
   df = None
@@ -199,7 +202,7 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
     print(df_path,"not found")
     df = pd.DataFrame()
   elif re.search(r'(csv|asc|prn|txt)$', df_path, re.IGNORECASE):
-    df = pd.read_csv(df_path, None, engine='python', encoding="latin_1")
+    df = pd.read_csv(df_path, None, engine='python')
   elif re.search(r'xls\w?$', df_path, re.IGNORECASE):
     df = pd_load_excel(df_path, table_name)
   elif df_path.lower().endswith('bmf'):
@@ -247,7 +250,7 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
 
 def pd_flat_columns(df):
   """ convert a column multi index into flat concatenated strings """
-  fci = [" ".join(_) for _ in df.columns.to_flat_index()]
+  fci = [" ".join(map(str,_)) for _ in df.columns.to_flat_index()]
   df.set_axis(fci, 1, True)
 
 def pd_save_dataframe(df, df_path, sheet_name='Sheet1'):
@@ -263,6 +266,7 @@ def pd_save_dataframe(df, df_path, sheet_name='Sheet1'):
         df.reset_index(levels, drop=True, inplace=True)
       df.reset_index(inplace=True)
     if isinstance(df.columns, pd.MultiIndex):
+      print("multi")
       pd_flat_columns(df)
     if isinstance(df_path, pd.ExcelWriter) or df_path.lower().endswith('.xlsx'):
       # multiple excel sheets mode
@@ -808,23 +812,28 @@ def excel_field_list(df_path, table_name, alternate = False):
   
   return r
 
-def pd_load_excel_350(df_path, table_name):
+def pd_from_openpyxl(ws):
   import pandas as pd
+  data = ws.values
+  cols = next(data)
+  return pd.DataFrame(data, columns=[i if cols[i] is None else cols[i] for i in range(len(cols))])  
+
+def pd_load_excel_350(df_path, table_name):
   import openpyxl
   wb = openpyxl.load_workbook(df_path)
+  ws = None
   if table_name and table_name in wb:
-    data = wb[table_name].values
+    ws = wb[table_name]
   else:
-    data = wb.active.values
-  cols = next(data)
-  return pd.DataFrame(data, columns=[i if cols[i] is None else cols[i] for i in range(len(cols))])
+    ws = wb.active
+  return pd_from_openpyxl(ws)
 
 def pd_load_excel(df_path, table_name = None):
   if sys.hexversion < 0x3060000:
     return pd_load_excel_350(df_path, table_name)
   import pandas as pd
   df = None
-  engine='openpyxl'
+  engine = 'openpyxl'
   if df_path.lower().endswith('.xls'):
     # openpyxl is not handling xls anymore
     engine = None
@@ -849,15 +858,19 @@ def pd_save_excel_tables(save_path, *arg):
       t = arg[i+1]
     if t is None:
       t = 'Table%d' % (i / 2 + 1)
-    ws = wb.create_sheet(title=t)
     df = arg[i]
-    if not str(arg[i].index.dtype).startswith('int'):
-      df = arg[i].reset_index()
-    for r in dataframe_to_rows(df, index=False, header=True):
-      ws.append(r)
+    ws = wb.create_sheet(title=t)
+    if isinstance(df, openpyxl.worksheet.worksheet.Worksheet):
+      for row in df.values:
+        ws.append(row)
+    else:
+      if not str(arg[i].index.dtype).startswith('int'):
+        df = arg[i].reset_index()
+      for r in dataframe_to_rows(df, index=False, header=True):
+        ws.append(r)
 
-    tab = Table(displayName=t, ref="A1:%s%d" % (get_column_letter(ws.max_column), ws.max_row))
-    ws.add_table(tab)
+      tab = Table(displayName=t, ref="A1:%s%d" % (get_column_letter(ws.max_column), ws.max_row))
+      ws.add_table(tab)
 
   wb.save(save_path)
 
@@ -1203,6 +1216,17 @@ def pd_save_obj(df, df_path):
   nodes, faces, lines = df_to_nodes_faces_lines(df)
   wavefront_save_obj(df_path, {"v": nodes, "f": faces, "l": lines})
 
+# Las
+def pd_load_las(df_path):
+  import lasio
+  f,c = lasio.open_file(df_path, autodetect_encoding_chars=-1)
+  las = lasio.read(f)
+  f.close()
+  df = las.df()
+  df.reset_index(inplace=True)
+  return df
+
+
 ### } IO
 
 ### { GUI
@@ -1407,7 +1431,7 @@ class smartfilelist(object):
         elif input_ext == ".msh" and s == 0:
           r = smartfilelist.default_columns + ['closed','node']
         elif input_ext == ".csv":
-          df = pd.read_csv(df_path, encoding="latin_1", nrows=s == 0 and 1 or None)
+          df = pd.read_csv(df_path, None, engine='python', nrows=s == 0 and 1 or None)
           if s == 0:
             r = df.columns.tolist()
           if s == 1:
@@ -1425,6 +1449,7 @@ class smartfilelist(object):
           while i < len(d['cells']):
             if d['cells'][i]['cell_type'] == 'code':
               break
+            i += 1
           r = [str.split(_, ' = ')[0] for _ in  d['cells'][i]['source']]
         elif re.search(r'xls\w?$', df_path, re.IGNORECASE):
           r = excel_field_list(df_path, table_name, s)
@@ -1451,6 +1476,8 @@ class smartfilelist(object):
             r.extend(pv.read(df_path).array_names)
           except:
             print("pyvista or vtk modules could not be loaded")
+        elif input_ext == ".las":
+          r = pd_load_las(df_path).columns.tolist()
 
         smartfilelist._cache[s][df_path] = r
 
@@ -1501,7 +1528,10 @@ class ScriptFrame(ttk.Frame):
       if token.type == '@':
         c = CheckBox(self, token.name, int(token.data) if token.data else 0)
       elif token.type == '*':
-        c = FileEntry(self, token.name, token.data)
+        if token.data:
+          c = FileEntry(self, token.name, token.data)
+        else:
+          c = DirectoryEntry(self, token.name)
       elif token.type == '=':
         c = LabelCombo(self, token.name, token.data)
       elif token.type == '#':
@@ -1816,6 +1846,38 @@ class FileEntry(ttk.Frame):
       self._label.configure(**kw)
     self._button.configure(**kw)
     self._control.configure(**kw)
+
+class DirectoryEntry(ttk.Frame):
+  '''custom Entry, with label and a Browse button'''
+  _label = None
+  _button = None
+  _control = None
+  def __init__(self, master, label, wildcard=''):
+    ttk.Frame.__init__(self, master, name=label)
+    self._button = ttk.Button(self, text="⛚", command=self.onBrowse)
+    self._button.pack(side=tk.RIGHT)
+    self._control = ttk.Entry(self)
+    self._control.pack(expand=True, fill=tk.BOTH, side=tk.RIGHT)
+    self._label = ttk.Label(self, text=label, width=-20)
+    self._label.pack(side=tk.LEFT)
+
+  # activate the browse button, which shows a native fileopen dialog and sets the Entry control
+  def onBrowse(self):
+    r = filedialog.askdirectory()
+    if r:
+      self.set(relative_paths(r))
+
+  def get(self):
+    return self._control.get()
+  
+  def set(self, value):
+    self._control.delete(0, tk.END)
+    self._control.insert(0, value)
+
+  def configure(self, **kw):
+    self._button.configure(**kw)
+    self._control.configure(**kw)
+    self._label.configure(**kw)
 
 # helper function to securely handle username + password
 class Credentials(list):
@@ -2155,9 +2217,11 @@ class AppTk(tk.Tk):
     threading.Thread(None, fork).start()
 
   def showHelp(self):
-    script_pdf = ClientScript.file('pdf')
-    if os.path.exists(script_pdf):
-      os.system(script_pdf)
+    for x in ['pdf','html']:
+      script_doc = ClientScript.file(x)
+      if os.path.exists(script_doc):
+        os.startfile(script_doc)
+        break
     else:
       messagebox.showerror('Help', 'Documentation file not found')
   
