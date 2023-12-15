@@ -20,7 +20,7 @@ https://github.com/pemn/usage-gui
 ---------------------------------
 '''
 
-__version__ = 20221222
+__version__ = 20231215
 
 ### { HOUSEKEEPING
 import sys, os, os.path, time, logging, re, pickle, threading
@@ -1711,19 +1711,9 @@ class ScriptFrame(ttk.Frame):
       elif token.type == '!':
         c = ComboPicker(self, token.name, token.data, True)
       elif token.type == '?':
-        if len(token.data):
-          c = HiddenInput(self, token.name, token.data)
-        else:
-          c = CredentialsInput(self, token.name)
+        c = HiddenInput(self, token.name, token.data)
       elif token.type == ':':
-        if token.data == 'portal':
-          import gisportal
-          c = gisportal.ArcGisField(self, token.name, token.data)
-        else:
-          c = ComboPicker(self, token.name, token.data)
-      elif token.type == '~':
-        import gisportal
-        c = gisportal.ArcGisPortal(self, token.name, None, token.data)
+        c = ComboPicker(self, token.name, token.data)
       elif token.name:
         c = LabelEntry(self, token.name)
       else:
@@ -1932,11 +1922,7 @@ class ComboPicker(LabelCombo):
       source_widget = self.master.nametowidget(self._source)
     if source_widget:
       # special case - show all lists in a sharepoint site
-      if self._source == 'sharepoint':
-        from sp_custom import sp_lists
-        self.setValues(sp_lists(source_widget.username, source_widget.pw))
-      else:
-        self.setValues(smartfilelist.get(source_widget.get(), self._alternate))
+      self.setValues(smartfilelist.get(source_widget.get(), self._alternate))
     else:
       self.setValues([self._source])
 
@@ -2048,118 +2034,6 @@ class DirectoryEntry(ttk.Frame):
     self._button.configure(**kw)
     self._control.configure(**kw)
     self._label.configure(**kw)
-
-# helper function to securely handle username + pass
-class Credentials(list):
-  '''
-  store credentials in a manageable manner
-  '''
-  _delim = ':'
-  _encoding = 'utf-8'
-  def __init__(self, s = None):
-    super().__init__(('', ''))
-    import base64
-    import cryptography.fernet
-    import uuid
-    # use symmetric encryption on the pass
-    # local unique node id is used as key
-    # decoding is possible to anyone with filesystem
-    # and execute access to where the store was created!
-    key = uuid.getnode().to_bytes(32, 'big')
-    self._f = cryptography.fernet.Fernet(base64.urlsafe_b64encode(key))
-    if s is not None:
-      self.parse(s)
-
-  def __str__(self):
-    return self._delim.join((self.username, self.passhash))
-
-  def parse(self, s):
-    data = s.split(self._delim)
-    if len(data) > 0:
-      self.username = data[0]
-    if len(data) > 1:
-      self.passhash = data[1]
-
-  @property
-  def username(self):
-    return self[0]
-
-  @username.setter
-  def username(self, value):
-    self[0] = value
-
-  @property
-  def pw(self):
-    return self[1]
-
-  @pw.setter
-  def pw(self, value):
-    self[1] = value
-
-  @property
-  def passhash(self):
-    step1 = bytes(self[1], self._encoding)
-    step2 = self._f.encrypt(step1)
-    return str(step2, self._encoding)
-
-  @passhash.setter
-  def passhash(self, value):
-    step1 = bytes(value, self._encoding)
-    try:
-      step2 = self._f.decrypt(step1)
-    except:
-      step2 = b''
-    self[1] = str(step2, self._encoding)
-
-# username + pass
-class CredentialsInput(ttk.LabelFrame):
-  ''' 
-  Control to input username and Pass
-  The result will be a single string in the format:
-  user:encodedpass
-  '''
-  _delim = ':'
-  def __init__(self, master, label, uri_value = None, pid_value = None):
-    # create a container frame for the combo and label
-    ttk.Labelframe.__init__(self, master, name=label, text=label)
-    self.columnconfigure(1, weight=1)
-
-    ttk.Label(self, text='👤').grid(row=0, column=0)
-    ttk.Label(self, text='🔑').grid(row=1, column=0)
-    
-    self._u = ttk.Entry(self)
-    self._u.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=0, column=1)
-    self._p = ttk.Entry(self, show='*')
-    self._p.grid(sticky=tk.W + tk.E, padx=4, pady=2, row=1, column=1)
-    self._c = Credentials()
-
-  @property
-  def username(self):
-    return self._u.get()
-    
-  @property
-  def pw(self):
-    return self._p.get()
-    
-  def get(self):
-    self._c.username = self._u.get()
-    self._c.pw = self._p.get()
-    return str(self._c)
-
-  def set(self, value):
-    if(value == None or len(value) == 0):
-      return
-    self._c.parse(value)
-    if len(value) > 0:
-      self._u.delete(0, tk.END)
-      self._u.insert(0, self._c.username)
-    if len(value) > 1:
-      self._p.delete(0, tk.END)
-      self._p.insert(0, self._c.pw)
-
-  def configure(self, **kw):
-    self._u.configure(**kw)
-    self._p.configure(**kw)
 
 # template for entry + callback button to be overriden by subclass
 class ButtonEntry(ttk.Frame):
@@ -2432,16 +2306,29 @@ class AppTk(tk.Tk):
         os.system(l)
 
   def openSettings(self):
-    result = filedialog.askopenfilename(filetypes=[("ini", "*.ini")])
+    result = filedialog.askopenfilename(filetypes=[('ini,json', ['*.ini','*.json'])])
     if len(result) == 0:
       return
-    self.script.set(Settings(result).load())
+    d = None
+    if result.lower().endswith('json'):
+      import json
+      d = json.load(open(result, 'r'))
+    else:
+      d = Settings(result).load()
+    if d is not None:
+      self.script.set(d)
     
   def saveSettings(self):
-    result = filedialog.asksaveasfilename(filetypes=[("ini", "*.ini")])
+    result = filedialog.asksaveasfilename(filetypes=[('ini,json', ['*.ini','*.json'])])
     if len(result) == 0:
       return
-    Settings(result).save(self.script.get(True))
+    d = self.script.get(True)
+    print(d)
+    if result.lower().endswith('json'):
+      import json
+      json.dump(d, open(result, 'w'))
+    else:
+      Settings(result).save(d)
   
   def destroy(self):
     Settings().save(self.script.get(True))
