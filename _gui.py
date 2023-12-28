@@ -20,7 +20,7 @@ https://github.com/pemn/usage-gui
 ---------------------------------
 '''
 
-__version__ = 20231215
+__version__ = 20231228
 
 ### { HOUSEKEEPING
 import sys, os, os.path, time, logging, re, pickle, threading
@@ -1418,9 +1418,10 @@ def usage_gui(usage = None):
       print(usage)
     else:
       # this special main will redirect to the business script
+      from __main__ import main
       main(*sys.argv[1:])
-
   else:
+    # display graphic interface based on the usage
     AppTk(usage).mainloop()
 
 class ClientScript(list):
@@ -1431,38 +1432,46 @@ class ClientScript(list):
   _type = None
   _file = None
   _base = None
-  @classmethod
-  def init(cls, client):
-    cls._file = client
-    cls._base = os.path.splitext(cls._file)[0]
-    # HARDCODED list of supporte file types
-    # to add a new file type, just add it to the list
-    for ext in ['csh','lava','pl','bat','vbs','js']:
-      if os.path.exists(cls._base + '.' + ext):
-        cls._file = cls._base + '.' + ext
-        cls._type = ext.lower()
-        break
+  _self = None
+  def __new__(cls, client = None):
+    # create a singleton
+    cls._self = super().__new__(cls)
+    return cls._self
 
-  @classmethod
-  def exe(cls):
-    if cls._type == "csh":
+  def __init__(self, client = None):
+    super().__init__(self)
+    self._usage = None
+    self._file = client
+    if client is not None:
+      self._base = os.path.splitext(self._file)[0]
+      # HARDCODED list of supporte file types
+      # to add a new file type, just add it to the list
+      for ext in ['csh','lava','pl','bat','vbs','js']:
+        if os.path.exists(self._base + '.' + ext):
+          self._file = self._base + '.' + ext
+          self._type = ext.lower()
+          break
+
+  @property
+  def exe(self):
+    if self._type == "csh":
       return ["csh","-f"]
-    if cls._type == "bat":
+    if self._type == "bat":
       return ["cmd", "/c"]
-    if cls._type == "vbs" or cls._type == "js":
+    if self._type == "vbs" or self._type == "js":
       return ["cscript", "/nologo"]
-    if cls._type == "lava" or cls._type == "pl":
+    if self._type == "lava" or self._type == "pl":
       return ["perl"]
-    if cls._type is None:
+    if self._type is None:
       return ["python"]
     return []
 
-  @classmethod
-  def run(cls, script):
-    print("# %s %s started" % (time.strftime('%H:%M:%S'), cls.file()))
+  def run(self, script):
+    print("# %s %s started" % (time.strftime('%H:%M:%S'), self.file()))
     p = None
-    if cls._type is None:
+    if self._type is None and __name__ != '__main__':
       import multiprocessing
+      from __main__ import main
       p = multiprocessing.Process(None, main, None, script.get())
       p.start()
       p.join()
@@ -1470,65 +1479,62 @@ class ClientScript(list):
     else:
       import subprocess
       # create a new process and passes the arguments on the command line
-      args = cls.exe() + [cls._file] + script.getArgs()
+      args = self.exe + [self._file] + script.getArgs()
       p = subprocess.Popen(" ".join(args))
       p.wait()
       p = p.returncode
 
     if not p:
-      print("# %s %s finished" % (time.strftime('%H:%M:%S'), cls.file()))
+      print("# %s %s finished" % (time.strftime('%H:%M:%S'), self.file()))
 
     return p
 
-  @classmethod
-  def type(cls):
-    return cls._type
+  @property
+  def type(self):
+    return self._type
   
-  @classmethod
-  def base(cls):
-    return cls._base
+  @property
+  def base(self):
+    return self._base
   
-  @classmethod
-  def file(cls, ext = None):
+  def file(self, ext = None):
     if ext is not None:
-      return cls._base + '.' + ext
-    return os.path.basename(cls._file)
+      return self._base + '.' + ext
+    return os.path.basename(self._file)
   
-  @classmethod
-  def args(cls, usage = None):
+  def args(self, usage = None):
     r = []
-    if usage is None and cls._type is not None:
-      usage = cls.parse()
+    #  and self._type is not None
+    if usage is None:
+      usage = self.parse()
 
     if usage:
-      m = re.search(cls._magic, usage, re.IGNORECASE)
+      m = re.search(self._magic, usage, re.IGNORECASE)
       if(m):
-        cls._usage = m.group(1)
+        self._usage = m.group(1)
     
-    if cls._usage is None or len(cls._usage) == 0:
+    if self._usage is None or len(self._usage) == 0:
       r = ['arguments']
     else:
-      r = cls._usage.split()
+      r = self._usage.split()
     return r
 
-  @classmethod
-  def fields(cls, usage = None):
-    return [re.match(r"^\w+", _).group(0) for _ in cls.args(usage)]
+  def fields(self, usage = None):
+    return [re.match(r"^\w+", _).group(0) for _ in self.args(usage)]
 
-  @classmethod
-  def parse(cls):
-    if os.path.exists(cls._file):
-      with open(cls._file, 'r', encoding='latin_1') as file:
+  def parse(self):
+    if os.path.exists(self._file):
+      with open(self._file, 'r', encoding='latin_1') as file:
         for line in file:
-          if re.search(cls._magic, line, re.IGNORECASE):
+          if re.search(self._magic, line, re.IGNORECASE):
             return line
     return None
 
-  @classmethod
-  def header(cls):
+  @property
+  def header(self):
     r = ""
-    if os.path.exists(cls._file):
-      with open(cls._file, 'r') as file:
+    if os.path.exists(self._file):
+      with open(self._file, 'r') as file:
         for line in file:
           if(line.startswith('#!')):
             continue
@@ -1538,6 +1544,16 @@ class ClientScript(list):
           else:
             break
     return r
+
+  def get(self, json = None):
+    print("get")
+    print(json)
+    return []
+
+  @classmethod
+  @property
+  def singleton(cls):
+    return cls._self
 
 class Settings(str):
   '''provide persistence for control values using pickled ini files'''
@@ -1659,6 +1675,7 @@ class UsageToken(str):
   _name = None
   _type = None
   _data = None
+  _usage2input = {'*': 'file', '%': 'radio', '@': 'checkbox', ':': 'text', '!': 'text'}
   def __init__(self, arg):
     super().__init__()
     # parse the token string extracting:
@@ -1683,6 +1700,16 @@ class UsageToken(str):
   @property
   def data(self):
     return self._data
+  @property
+  def json(self):
+    d = {'field': self.name, 'type': self._usage2input.get(self.type,'text')}
+    if d['type'] in ['radio','combo']:
+      items = self._data
+      if not isinstance(items, (list,tuple)):
+        items = items.split(',')
+      d['options'] = {'items': items}
+
+    return d
 
 # main content of dynamic form
 class ScriptFrame(ttk.Frame):
@@ -1691,7 +1718,7 @@ class ScriptFrame(ttk.Frame):
   def __init__(self, master, usage = None):
     ttk.Frame.__init__(self, master)
 
-    self._tokens = [UsageToken(_) for _ in ClientScript.args(usage)]
+    self._tokens = [UsageToken(_) for _ in ClientScript.singleton.args(usage)]
     # for each token, create a child control of the apropriated type
     for token in self._tokens:
       c = None
@@ -1722,7 +1749,7 @@ class ScriptFrame(ttk.Frame):
       
   def copy(self):
     "Assemble the current parameters and copy the full command line to the clipboard"
-    cmd = " ".join(ClientScript.exe() + [ClientScript.file()] + self.getArgs())
+    cmd = " ".join(ClientScript.singleton.exe + [ClientScript.singleton.file()] + self.getArgs())
     print(cmd)
     self.master.clipboard_clear()
     self.master.clipboard_append(cmd)
@@ -2180,9 +2207,9 @@ class AppTk(tk.Tk):
   _logofile = None
   _w10t = None
   def __init__(self, usage, client=sys.argv[0]):
-    ClientScript.init(client)
+    ClientScript(client)
     tk.Tk.__init__(self)
-    self.title(ClientScript._base)
+    self.title(ClientScript.singleton.base)
     
     self._iconfile = Branding().name
     self._logofile = Branding('png', (100,100))
@@ -2201,7 +2228,7 @@ class AppTk(tk.Tk):
     self.script.bind("<Configure>", self.onFrameConfigure)
     self.canvas.bind('<Configure>', self.onCanvasConfigure)
 
-    ttk.Label(self, text=ClientScript.header()).pack(side=tk.BOTTOM)
+    ttk.Label(self, text=ClientScript.singleton.header).pack(side=tk.BOTTOM)
     
     self.logo = tk.Canvas(self, width=self._logofile.image.size[0], height=self._logofile.image.size[1])
     
@@ -2250,7 +2277,7 @@ class AppTk(tk.Tk):
         menu_plus = tk.Menu(menubar)
         menu_plus.add_command(label='Enable finished notifications', command=self.installToast)
         menubar.add_cascade(menu=menu_plus, label='Options')
-    if os.path.exists(ClientScript.file('fix')):
+    if os.path.exists(ClientScript.singleton.file('fix')):
       menu_help.add_command(label='Setup Fixes', command=self.setupFixes)
       
 
@@ -2264,7 +2291,7 @@ class AppTk(tk.Tk):
       self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
       t = time.time()
-      p = ClientScript.run(self.script)
+      p = ClientScript.singleton.run(self.script)
       
       self.progress.stop()
       self.progress.configure(value = p and 50 or 100)
@@ -2273,15 +2300,15 @@ class AppTk(tk.Tk):
 
       if self._w10t:
         if (time.time() - t) > 9:
-          self._w10t.show_toast(ClientScript.file(), p and "check console messages" or "finished")
+          self._w10t.show_toast(ClientScript.singleton.file(), p and "check console messages" or "finished")
       elif p:
-        messagebox.showwarning(message="Check console messages",title=ClientScript.type())
+        messagebox.showwarning(message="Check console messages",title=ClientScript.singleton.type)
 
     threading.Thread(None, fork).start()
 
   def showHelp(self):
     for x in ['html','pdf']:
-      script_doc = ClientScript.file(x)
+      script_doc = ClientScript.singleton.file(x)
       if os.path.exists(script_doc):
         os.startfile(script_doc)
         break
@@ -2300,7 +2327,7 @@ class AppTk(tk.Tk):
       package_install('win10toast')
 
   def setupFixes(self):
-    with open(ClientScript.file('fix'), 'r') as f:
+    with open(ClientScript.singleton.file('fix'), 'r') as f:
       for l in f:
         log(l)
         os.system(l)
@@ -2323,7 +2350,6 @@ class AppTk(tk.Tk):
     if len(result) == 0:
       return
     d = self.script.get(True)
-    print(d)
     if result.lower().endswith('json'):
       import json
       json.dump(d, open(result, 'w'))
@@ -2405,19 +2431,18 @@ class Branding(object):
 ### { ENTRY POINTS
 
 # default main for when this script is standalone
-# when this as a library, will redirect to the caller script main()
-def main(*args):
-  if (__name__ != '__main__'):
-    from __main__ import main
-    # redirect to caller script main
-    main(*args)
-    return
+# when this is a library, will redirect to the caller script main()
+# def main(*args):
+#   print("main",__name__)
+#   if __name__ != '__main__':
+#     from __main__ import main
+#     # redirect to caller script main
+#     main(*args)
+#     return
 # special entry point for cmd
-if __name__ == '__main__' and sys.argv[0].endswith('_gui.py') and len(sys.argv) == 1:
-  pass
-elif __name__ == '__main__' and len(sys.argv) == 2:
+if __name__ == '__main__' and len(sys.argv) == 2:
   AppTk(None, sys.argv[1]).mainloop()
-elif __name__ == '__main__' and sys.argv[0].endswith('_gui.py'):
-  main(sys.argv)
+#elif __name__ == '__main__' and sys.argv[0].endswith('_gui.py'):
+#  main(sys.argv)
 
 ### } ENTRY POINTS
