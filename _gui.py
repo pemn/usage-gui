@@ -1505,13 +1505,14 @@ class ClientScript(list):
   def args(self, usage = None):
     r = []
     #  and self._type is not None
-    if usage is None:
-      usage = self.parse()
+    if self._usage is None:
+      if usage is None:
+        usage = self.parse()
 
-    if usage:
-      m = re.search(self._magic, usage, re.IGNORECASE)
-      if(m):
-        self._usage = m.group(1)
+      if usage:
+        m = re.search(self._magic, usage, re.IGNORECASE)
+        if(m):
+          self._usage = m.group(1)
     
     if self._usage is None or len(self._usage) == 0:
       r = ['arguments']
@@ -1545,10 +1546,24 @@ class ClientScript(list):
             break
     return r
 
-  def get(self, json = None):
-    print("get")
-    print(json)
-    return []
+  def get(self, data = None):
+    args = []
+    if data is not None:
+      for f in self.fields():
+        print(f)
+        arg = data.get(f)
+        if arg is None:
+          arg = '""'
+        elif isinstance(arg, bool):
+          arg = int(arg)
+        elif not isinstance(arg, str):
+          pass
+        elif len(arg) == 0 or not set(' ",;%!\\').isdisjoint(arg):
+          arg = '"' + arg + '"'
+        args.append(str(arg))
+    return args      
+    #if data is not None:
+    #return [data.get(_) is not None and str(data.get(_)) or '""' for _ in self.singleton.fields()]
 
   @classmethod
   @property
