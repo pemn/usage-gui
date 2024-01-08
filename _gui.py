@@ -1406,13 +1406,15 @@ def getRectangleSchema(rect, cell_size):
 
 ### { GUI
 
-# show gui or run main
 def usage_gui(usage = None):
   '''
   this function handles most of the details required when using a exe interface
+  if the -h or --help switch is passed, show help
+  if command line arguments are supplied, call main with args
+  if a json or yaml document was supplied, call main with kwargs
+  otherwise open a GUI whose controls are created acoording to the usage text
   '''
-  # we already have arguments, run business code
-  if(len(sys.argv) > 1):
+  if len(sys.argv) > 1:
     # traps help switches: /? -? /h -h /help -help
     if(usage is not None and re.match(r'[\-/](?:\?|h|help)$', sys.argv[1])):
       print(usage)
@@ -1421,8 +1423,22 @@ def usage_gui(usage = None):
       from __main__ import main
       main(*sys.argv[1:])
   else:
-    # display graphic interface based on the usage
-    AppTk(usage).mainloop()
+    kwargs = None
+    if not os.isatty(0):
+      s = sys.stdin.read()
+      if len(s) == 0: pass
+      elif s[0] == '{':
+        import json
+        kwargs = json.loads(s)
+      else:
+        import yaml
+        kwargs = yaml.safe_load(s)
+    if isinstance(kwargs, dict):
+      from __main__ import main
+      main(**kwargs)
+    else:
+      # display graphic interface based on the usage
+      AppTk(usage).mainloop()
 
 class ClientScript(list):
   '''Handles the script with the same name as this interface file'''
@@ -1563,10 +1579,10 @@ class ClientScript(list):
         args.append(str(arg))
     return args      
     #if data is not None:
-    #return [data.get(_) is not None and str(data.get(_)) or '""' for _ in self.singleton.fields()]
+    #return [data.get(_) is not None and str(data.get(_)) or '""' for _ in self.singleton().fields()]
 
+  #@property
   @classmethod
-  @property
   def singleton(cls):
     return cls._self
 
@@ -1733,7 +1749,7 @@ class ScriptFrame(ttk.Frame):
   def __init__(self, master, usage = None):
     ttk.Frame.__init__(self, master)
 
-    self._tokens = [UsageToken(_) for _ in ClientScript.singleton.args(usage)]
+    self._tokens = [UsageToken(_) for _ in ClientScript.singleton().args(usage)]
     # for each token, create a child control of the apropriated type
     for token in self._tokens:
       c = None
@@ -1764,7 +1780,7 @@ class ScriptFrame(ttk.Frame):
       
   def copy(self):
     "Assemble the current parameters and copy the full command line to the clipboard"
-    cmd = " ".join(ClientScript.singleton.exe + [ClientScript.singleton.file()] + self.getArgs())
+    cmd = " ".join(ClientScript.singleton().exe + [ClientScript.singleton().file()] + self.getArgs())
     print(cmd)
     self.master.clipboard_clear()
     self.master.clipboard_append(cmd)
@@ -2224,7 +2240,7 @@ class AppTk(tk.Tk):
   def __init__(self, usage, client=sys.argv[0]):
     ClientScript(client)
     tk.Tk.__init__(self)
-    self.title(ClientScript.singleton.base)
+    self.title(ClientScript.singleton().base)
     
     self._iconfile = Branding().name
     self._logofile = Branding('png', (100,100))
@@ -2243,7 +2259,7 @@ class AppTk(tk.Tk):
     self.script.bind("<Configure>", self.onFrameConfigure)
     self.canvas.bind('<Configure>', self.onCanvasConfigure)
 
-    ttk.Label(self, text=ClientScript.singleton.header).pack(side=tk.BOTTOM)
+    ttk.Label(self, text=ClientScript.singleton().header).pack(side=tk.BOTTOM)
     
     self.logo = tk.Canvas(self, width=self._logofile.image.size[0], height=self._logofile.image.size[1])
     
@@ -2292,7 +2308,7 @@ class AppTk(tk.Tk):
         menu_plus = tk.Menu(menubar)
         menu_plus.add_command(label='Enable finished notifications', command=self.installToast)
         menubar.add_cascade(menu=menu_plus, label='Options')
-    if os.path.exists(ClientScript.singleton.file('fix')):
+    if os.path.exists(ClientScript.singleton().file('fix')):
       menu_help.add_command(label='Setup Fixes', command=self.setupFixes)
       
 
@@ -2306,7 +2322,7 @@ class AppTk(tk.Tk):
       self.progress.configure(value = 0, mode = "indeterminate")
       self.progress.start()
       t = time.time()
-      p = ClientScript.singleton.run(self.script)
+      p = ClientScript.singleton().run(self.script)
       
       self.progress.stop()
       self.progress.configure(value = p and 50 or 100)
@@ -2315,15 +2331,15 @@ class AppTk(tk.Tk):
 
       if self._w10t:
         if (time.time() - t) > 9:
-          self._w10t.show_toast(ClientScript.singleton.file(), p and "check console messages" or "finished")
+          self._w10t.show_toast(ClientScript.singleton().file(), p and "check console messages" or "finished")
       elif p:
-        messagebox.showwarning(message="Check console messages",title=ClientScript.singleton.type)
+        messagebox.showwarning(message="Check console messages",title=ClientScript.singleton().type)
 
     threading.Thread(None, fork).start()
 
   def showHelp(self):
     for x in ['html','pdf']:
-      script_doc = ClientScript.singleton.file(x)
+      script_doc = ClientScript.singleton().file(x)
       if os.path.exists(script_doc):
         os.startfile(script_doc)
         break
@@ -2342,32 +2358,40 @@ class AppTk(tk.Tk):
       package_install('win10toast')
 
   def setupFixes(self):
-    with open(ClientScript.singleton.file('fix'), 'r') as f:
+    with open(ClientScript.singleton().file('fix'), 'r') as f:
       for l in f:
         log(l)
         os.system(l)
 
   def openSettings(self):
-    result = filedialog.askopenfilename(filetypes=[('ini,json', ['*.ini','*.json'])])
+    result = filedialog.askopenfilename(filetypes=[('ini,json,yaml', ['*.ini','*.json','*.yaml'])])
     if len(result) == 0:
       return
     d = None
     if result.lower().endswith('json'):
       import json
       d = json.load(open(result, 'r'))
+    elif result.lower().endswith('yaml'):
+      import yaml
+      d = yaml.safe_load(open(result, 'r'))
     else:
       d = Settings(result).load()
     if d is not None:
       self.script.set(d)
     
   def saveSettings(self):
-    result = filedialog.asksaveasfilename(filetypes=[('ini,json', ['*.ini','*.json'])])
+    result = filedialog.asksaveasfilename(filetypes=[('ini,json,yaml', ['*.ini','*.json','*.yaml'])])
     if len(result) == 0:
       return
     d = self.script.get(True)
     if result.lower().endswith('json'):
       import json
       json.dump(d, open(result, 'w'))
+    elif result.lower().endswith('yaml'):
+      import yaml
+      # required to save commalist as a standard python list
+      yaml.add_representer(commalist, lambda dumper, data: dumper.represent_list(data))
+      yaml.dump(d, open(result, 'w'))
     else:
       Settings(result).save(d)
   
