@@ -17,7 +17,7 @@ May also be used to run scripts using the python bundled with the commercial sof
  - Copy the full script command line to clipboard, so you can run it on enviroments without a display (Ex.: telnet/ssh).
  - Single file. All resources (icon, logo, classes) are included in a single .py file (or exe if you package).
  - Adaptable branding. The icon and logo will change according to enviroment variable USERDOMAIN. Default is the WinPython logo.
- - Can be packaged into a standalone exe or called using a .cmd file from windows explorer.
+ - Can be packaged into a standalone exe or called using a eponimous .cmd file from windows explorer.
  - Uses the ubiquitous and mature Tkinter (tcl/tk) for the backend rendering
  - All modules used are bundled by default on the most popular python distributions.
  - Can easily be embedded with business logic to create a single file standalone solution, even without packaging (single .py file)
